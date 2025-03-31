@@ -3,8 +3,8 @@ import { Input } from './input.js';
 window.addEventListener('load', () => {
 // Create a Supabase client to handle real-time data synchronization
 const supabaseClient = supabase.createClient(
-    'https://gqbeyhseepsnhxjblxzh.supabase.co', // Supabase project URL
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdxYmV5aHNlZXBzbmh4amJseHpoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI3Njk5NDksImV4cCI6MjA1ODM0NTk0OX0.c-3qmp9WTVOEVMlJnSS4b128roCBHd978t3lGebWq4s' // Supabase API key
+    'https://abczcglriaawbndsphij.supabase.co', // Supabase project URL
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiY3pjZ2xyaWFhd2JuZHNwaGlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM0MDAxODMsImV4cCI6MjA1ODk3NjE4M30.psaz7mXVvLBdULtyUiF5LRPe9FqRafEbv33ulc5NsMI' // Supabase API key
 );
 
 // Get the canvas and set up the rendering context
