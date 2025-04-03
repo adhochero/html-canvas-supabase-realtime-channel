@@ -1,192 +1,233 @@
 import { Input } from './input.js';
 
-window.addEventListener('load', () => {
-// Create a Supabase client to handle real-time data synchronization
-const supabaseClient = supabase.createClient(
-    'https://abczcglriaawbndsphij.supabase.co', // Supabase project URL
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiY3pjZ2xyaWFhd2JuZHNwaGlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM0MDAxODMsImV4cCI6MjA1ODk3NjE4M30.psaz7mXVvLBdULtyUiF5LRPe9FqRafEbv33ulc5NsMI' // Supabase API key
-);
+window.addEventListener('load', async () => {
+    const supabaseUrl = 'https://gqbeyhseepsnhxjblxzh.supabase.co';
+    const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdxYmV5aHNlZXBzbmh4amJseHpoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI3Njk5NDksImV4cCI6MjA1ODM0NTk0OX0.c-3qmp9WTVOEVMlJnSS4b128roCBHd978t3lGebWq4s';
+    const supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+    
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
 
-// Get the canvas and set up the rendering context
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
+    let lastUpdate = Date.now();
 
-// Adjust canvas size to match the window size
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+    let users = {};
+    let localUserPosition = { x: 0, y: 0 };
+    const localUserId = crypto.randomUUID();
 
-// Define the local player object
-const myPlayer = {
-    id: Math.random().toString(36).substring(2, 9), // Generate a random unique ID
-    x: canvas.width / 2,   // Initial X position (center of screen)
-    y: canvas.height / 2,  // Initial Y position (center of screen)
-    targetX: canvas.width / 2,  // Target position for smooth interpolation
-    targetY: canvas.height / 2,
-    radius: 15,  // Player size
-    color: `hsl(${Math.random() * 360}, 70%, 50%)`, // Random color for differentiation
-    speed: 3  // Player movement speed
-};
-
-// Object to store all players (both local and remote)
-const players = {};
-
-// Track the last update time for game logic (can be used for animations or network sync)
-let lastUpdate = 0;
-
-// Set up a real-time communication channel through Supabase
-const channel = supabaseClient.channel("game_room", {
-    config: { presence: { key: myPlayer.id } } // Use the player's unique ID as the presence key
-});
-
-// When the player joins the channel, send their initial position and color
-channel.subscribe(async (status) => {
-    if (status === "SUBSCRIBED") await channel.track({
-        x: myPlayer.x,
-        y: myPlayer.y,
-        color: myPlayer.color
+    // Channel for presence and broadcast
+    const channel = supabase.channel('user_tracking', {
+        config: { presence: { key: 'user_id' } }
     });
-});
 
-// Handle real-time updates for players joining, moving, or leaving
-channel.on("presence", { event: "sync" }, () => {
-    const state = channel.presenceState(); // Get the current state of all players
+    // Setup presence tracking
+    channel
+    .on('presence', { event: 'sync' }, () => {
+        // Efficiently rebuild the users object only when absolutely needed
+        const newUsers = {};
+        Object.values(channel.presenceState()).forEach(presences => {
+            presences.forEach(presence => {
+                newUsers[presence.user_id] = {
+                    // Preserve existing data if available, only update if missing
+                    user_position: users[presence.user_id]?.user_position 
+                                || presence.user_position 
+                                || { x: 0, y: 0 }
+                };
+            });
+        });
+        users = newUsers; // Atomic swap
+    })
+    .on('presence', { event: 'join' }, ({ newPresences }) => {
+        // Only add truly new users (not already tracked)
+        newPresences.forEach(presence => {
+            if (!users[presence.user_id]) {
+                users[presence.user_id] = {
+                    user_position: presence.user_position || { x: 0, y: 0 }
+                };
+            }
+        });
+    })
+    .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+        // Immediate cleanup
+        leftPresences.forEach(presence => {
+            delete users[presence.user_id];
+        });
+    });
 
-    // Iterate through all players in the state and update their positions
-    Object.entries(state).forEach(([id, data]) => {
-        if (!players[id]) {
-            // If a new player appears, add them with initial values
-            players[id] = {
-                x: data[0].x,
-                y: data[0].y,
-                targetX: data[0].x,
-                targetY: data[0].y,
-                color: data[0].color
+    // Handle broadcast messages
+    channel.on('broadcast', { event: 'user_move' }, ({ payload }) => {
+        if (payload.user_id !== localUserId) {  // Don't update our own position from broadcasts
+            users[payload.user_id] = {
+                user_position: payload.user_position
             };
-        } else {
-            // Update existing players' target positions for smooth interpolation
-            players[id].targetX = data[0].x;
-            players[id].targetY = data[0].y;
         }
     });
 
-    // Remove players who have left the game
-    Object.keys(players).forEach(id => { if (!state[id]) delete players[id]; });
-});
-
-// Add the local player to the `players` object so it's included in the game
-players[myPlayer.id] = myPlayer;
-
-// Initialize player input handling
-let input = new Input(canvas);
-input.addEventListeners();
-
-// Camera object to track the player's position smoothly
-let camera = { x: 0, y: 0 };
-let cameraFollowSpeed = 0.05;
-
-// Start the game loop
-gameLoop();
-
-// Clean up when the player leaves the page
-window.addEventListener('beforeunload', () => channel.untrack());
-
-// Handle window resizing to keep the canvas fullscreen
-window.addEventListener('resize', () => {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-});
-
-
-function gameLoop() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.beginPath();
-    ctx.save();
-
-    let moved = false;
-    if (input.getJoystickValues().x != 0) {myPlayer.x += (input.getJoystickValues().x * myPlayer.speed); moved = true;}
-    if (input.getJoystickValues().y != 0) {myPlayer.y += (input.getJoystickValues().y * myPlayer.speed); moved = true;}
-
-    // If the player has moved and 100ms have passed since the last update, send the new position to the server
-    if (moved && Date.now() - lastUpdate > 100) {
-        lastUpdate = Date.now();
-
-        // Set the player's target position to their current position (so they don't suddenly jump)
-        myPlayer.targetX = myPlayer.x;
-        myPlayer.targetY = myPlayer.y;
-
-        // Track the player's position and color to the server (sends data for presence in the game room)
-        channel.track({ x: myPlayer.x, y: myPlayer.y, color: myPlayer.color });
-    }
-
-    // Update all other players' positions using smooth interpolation (lerp)
-    Object.entries(players).forEach(([id, player]) => {
-        // Use linear interpolation (lerp) to smoothly move players towards their target positions
-        player.x = lerp(player.x, player.targetX, 0.05);
-        player.y = lerp(player.y, player.targetY, 0.05);
+    // Subscribe to the channel
+    channel.subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+            channel.track({
+                user_id: localUserId,
+                user_position: localUserPosition,
+            });
+        }
     });
 
-    // If the local player's data is in the players object, update the camera to follow them
-    if (players[myPlayer.id]) {
-        // Get the smoothed position of the local player (after interpolation)
-        let smoothedX = players[myPlayer.id].x;
-        let smoothedY = players[myPlayer.id].y;
 
-        // Update the camera's position to follow the local player using lerp for smooth movement
-        camera.x = lerp(camera.x, -smoothedX + canvas.width / 2, cameraFollowSpeed);
-        camera.y = lerp(camera.y, -smoothedY + canvas.height / 2, cameraFollowSpeed);
+    //non network game stuff
+
+    let input = new Input(canvas);
+    input.addEventListeners();
+
+    let inputSmoothing = { x: 0, y: 0 };
+    let velocity = { x: 0, y: 0 };
+    let moveDirection = { x: 0, y: 0 };
+    let inputResponsiveness = 3;
+    let localUserSpeed = 200;
+
+    let camera = { x: 0, y: 0 };
+    let cameraFollowSpeed = 0.05;
+
+    const drawnPositions = {};
+
+    let lastTimeStamp = 0;
+    
+    // Start the animation loop
+    window.requestAnimationFrame(update);
+  
+    // Simple animation loop to log users' mouse positions
+    function update(timeStamp) {
+        const maxDeltaTime = 0.1; // Maximum time difference between frames (in seconds)
+        const deltaTime = Math.min((timeStamp - lastTimeStamp) / 1000, maxDeltaTime);
+        lastTimeStamp = timeStamp;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+
+        const inputDirection = input.getJoystickValues();
+
+        // Smooth input movement using lerp
+        inputSmoothing.x = lerp(inputSmoothing.x, inputDirection.x, inputResponsiveness * deltaTime);
+        inputSmoothing.y = lerp(inputSmoothing.y, inputDirection.y, inputResponsiveness * deltaTime);
+
+        // Apply velocity falloff
+        velocity.x = lerp(velocity.x, 0, inputResponsiveness * deltaTime);
+        velocity.y = lerp(velocity.y, 0, inputResponsiveness * deltaTime);
+
+        // Combine velocity and input movement
+        moveDirection.x = velocity.x + (inputSmoothing.x * localUserSpeed);
+        moveDirection.y = velocity.y + (inputSmoothing.y * localUserSpeed);
+
+        // Handle local player movement
+        let moved = false;
+        if (moveDirection.x != 0) {
+            localUserPosition.x += moveDirection.x * deltaTime;
+            moved = true;
+        }
+        if (moveDirection.y != 0) {
+            localUserPosition.y += moveDirection.y * deltaTime;
+            moved = true;
+        }
+
+        // thottle my network updates
+        const now = Date.now();
+        if (moved && now - lastUpdate > 250) {
+            lastUpdate = now;
+
+            // Update our presence
+            channel.track({
+                user_id: localUserId,
+                user_position: localUserPosition,
+            });
+
+            // Broadcast user position to others
+            channel.send({
+                type: 'broadcast',
+                event: 'user_move',
+                payload: {
+                    user_id: localUserId,
+                    user_position: localUserPosition,
+                },
+            });
+        }
+
+        // Update camera to follow local player
+        camera.x = lerp(camera.x, -localUserPosition.x + canvas.width / 2, cameraFollowSpeed);
+        camera.y = lerp(camera.y, -localUserPosition.y + canvas.height / 2, cameraFollowSpeed);
+
+        // Draw grid
+        drawGrid(-(camera.x + canvas.width / 2), -(camera.y + canvas.height / 2));
+
+        // Apply camera transform
+        ctx.translate(camera.x, camera.y);
+
+        //draw other users
+        Object.entries(users).forEach(([id, data]) => {
+            if(id === localUserId) return;
+
+                // Initialize the drawn position if it doesn't exist
+                if (!drawnPositions[id]) {
+                    drawnPositions[id] = {
+                        x: data.user_position.x,
+                        y: data.user_position.y
+                    };
+                }
+    
+            // Apply lerp to smooth the movement
+            drawnPositions[id].x = lerp(drawnPositions[id].x, data.user_position.x, 0.03);
+            drawnPositions[id].y = lerp(drawnPositions[id].y, data.user_position.y, 0.03);
+
+            drawUser(drawnPositions[id], id);
+        });
+
+        drawUser(localUserPosition, localUserId);
+        ctx.restore();
+
+        window.requestAnimationFrame(update);
     }
 
-    // Draw the grid on the canvas, offsetting it by the camera's current position
-    drawGrid(-(camera.x + canvas.width / 2), -(camera.y + canvas.height / 2));
-
-    // Apply the camera's transformation to the context (i.e., move the "view" to follow the camera)
-    ctx.translate(camera.x, camera.y);
-
-    // Render all players (including the local player) on the canvas
-    Object.entries(players).forEach(([id, player]) => {
+    function drawUser(userPosition, userId){
         ctx.beginPath();
-        ctx.arc(player.x, player.y, myPlayer.radius, 0, Math.PI * 2);
-        ctx.fillStyle = player.color;
+        ctx.arc(userPosition.x, userPosition.y, 10, 0, Math.PI * 2);
+        ctx.fillStyle = 'black';
         ctx.fill();
         ctx.fillStyle = 'black';
-        ctx.font = '12px Arial';
+        ctx.font = 'bold 12px Arial';
         ctx.textAlign = 'center';
-        ctx.fillText(id.substring(0, 6), player.x, player.y - myPlayer.radius - 5);
+        ctx.fillText(userId.substring(0, 6), userPosition.x, userPosition.y - 10 - 5);
+    }
+
+    window.addEventListener('resize', () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
     });
 
-    ctx.restore();
-
-    requestAnimationFrame(gameLoop);
-}
-
-function lerp(start, end, t) {
-    return start + (end - start) * t;
-}
-
-function drawGrid(offsetX, offsetY) {
-    let gridSize = 50; // Size of each grid cell
-    ctx.strokeStyle = "#cccccc"; // Light grey color
-    ctx.lineWidth = 0.5;
-
-    // Find the top-left corner of the grid relative to the camera
-    let startX = Math.floor(offsetX / gridSize) * gridSize - offsetX;
-    let startY = Math.floor(offsetY / gridSize) * gridSize - offsetY;
-
-    // Draw vertical grid lines
-    for (let x = startX; x < canvas.width; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
-        ctx.stroke();
+    function lerp(start, end, t) {
+        return start + (end - start) * t;
     }
-
-    // Draw horizontal grid lines
-    for (let y = startY; y < canvas.height; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
-        ctx.stroke();
+    
+    function drawGrid(offsetX, offsetY) {
+        const gridSize = 50;
+        ctx.strokeStyle = "#cccccc";
+        ctx.lineWidth = 0.5;
+    
+        const startX = Math.floor(offsetX / gridSize) * gridSize - offsetX;
+        const startY = Math.floor(offsetY / gridSize) * gridSize - offsetY;
+    
+        for (let x = startX; x < canvas.width; x += gridSize) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+            ctx.stroke();
+        }
+    
+        for (let y = startY; y < canvas.height; y += gridSize) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+            ctx.stroke();
+        }
     }
-}
-
+          
 });
