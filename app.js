@@ -19,6 +19,7 @@ let localUserPosition = { x: 0, y: 0 };
 const localUserId = crypto.randomUUID();
 
 const drawnPositions = {};
+let positionSpeed = 1.25;
 
 let input = new Input(canvas);
 input.addEventListeners();
@@ -30,7 +31,7 @@ let inputResponsiveness = 3;
 let localUserSpeed = 200;
 
 let camera = { x: 0, y: 0 };
-let cameraFollowSpeed = 0.05;
+let cameraFollowSpeed = 3;
 
 let lastTimeStamp = 0;
 
@@ -162,8 +163,8 @@ function update(timeStamp) {
     }
 
     // Update camera to follow local player
-    camera.x = lerp(camera.x, -localUserPosition.x + canvas.width / 2, cameraFollowSpeed);
-    camera.y = lerp(camera.y, -localUserPosition.y + canvas.height / 2, cameraFollowSpeed);
+    camera.x = lerp(camera.x, -localUserPosition.x + canvas.width / 2, cameraFollowSpeed * deltaTime);
+    camera.y = lerp(camera.y, -localUserPosition.y + canvas.height / 2, cameraFollowSpeed * deltaTime);
 
     // Draw grid
     drawGrid(-(camera.x + canvas.width / 2), -(camera.y + canvas.height / 2));
@@ -184,8 +185,8 @@ function update(timeStamp) {
             }
 
         // Apply lerp to smooth the movement
-        drawnPositions[id].x = lerp(drawnPositions[id].x, data.user_position.x, 0.03);
-        drawnPositions[id].y = lerp(drawnPositions[id].y, data.user_position.y, 0.03);
+        drawnPositions[id].x = lerp(drawnPositions[id].x, data.user_position.x, positionSpeed * deltaTime);
+        drawnPositions[id].y = lerp(drawnPositions[id].y, data.user_position.y, positionSpeed * deltaTime);
 
         drawUser(drawnPositions[id], id);
     });
