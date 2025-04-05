@@ -6,9 +6,14 @@ window.addEventListener('load', async () => {
     const supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
     
     const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    const context = canvas.getContext('2d');
+    const canvasViewportPercentage = 0.9;
+    const canvasResolutionWidth = 666;
+    const canvasResolutionHeight = 666;
+
+    adjustCanvasSize();
+    window.onresize = adjustCanvasSize;
+    
 
     let lastUpdate = Date.now();
 
@@ -92,6 +97,7 @@ window.addEventListener('load', async () => {
     const drawnPositions = {};
 
     let lastTimeStamp = 0;
+
     
     // Start the animation loop
     window.requestAnimationFrame(update);
@@ -102,8 +108,10 @@ window.addEventListener('load', async () => {
         const deltaTime = Math.min((timeStamp - lastTimeStamp) / 1000, maxDeltaTime);
         lastTimeStamp = timeStamp;
 
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.save();
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.save();
+        context.beginPath();
+        context.imageSmoothingEnabled = false;
 
         const inputDirection = input.getJoystickValues();
 
@@ -160,7 +168,7 @@ window.addEventListener('load', async () => {
         drawGrid(-(camera.x + canvas.width / 2), -(camera.y + canvas.height / 2));
 
         // Apply camera transform
-        ctx.translate(camera.x, camera.y);
+        context.translate(camera.x, camera.y);
 
         //draw other users
         Object.entries(users).forEach(([id, data]) => {
@@ -182,26 +190,35 @@ window.addEventListener('load', async () => {
         });
 
         drawUser(localUserPosition, localUserId);
-        ctx.restore();
+        context.restore();
 
         window.requestAnimationFrame(update);
     }
 
     function drawUser(userPosition, userId){
-        ctx.beginPath();
-        ctx.arc(userPosition.x, userPosition.y, 10, 0, Math.PI * 2);
-        ctx.fillStyle = 'black';
-        ctx.fill();
-        ctx.fillStyle = 'black';
-        ctx.font = 'bold 12px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText(userId.substring(0, 6), userPosition.x, userPosition.y - 10 - 5);
+        context.beginPath();
+        context.arc(userPosition.x, userPosition.y, 10, 0, Math.PI * 2);
+        context.fillStyle = 'black';
+        context.fill();
+        context.fillStyle = 'black';
+        context.font = 'bold 12px Arial';
+        context.textAlign = 'center';
+        context.fillText(userId.substring(0, 6), userPosition.x, userPosition.y - 10 - 5);
     }
 
-    window.addEventListener('resize', () => {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-    });
+    function adjustCanvasSize() {
+        let scaleX = window.innerWidth / canvasResolutionWidth;
+        let scaleY = window.innerHeight / canvasResolutionHeight;
+        let scale = Math.min(scaleX, scaleY) * canvasViewportPercentage;
+
+        // Set the internal resolution (render size)
+        canvas.width = canvasResolutionWidth;
+        canvas.height = canvasResolutionHeight;
+
+        // Set the display size (CSS pixels)
+        canvas.style.width = canvasResolutionWidth * scale + 'px';
+        canvas.style.height = canvasResolutionHeight * scale + 'px';
+    }
 
     function lerp(start, end, t) {
         return start + (end - start) * t;
@@ -209,24 +226,24 @@ window.addEventListener('load', async () => {
     
     function drawGrid(offsetX, offsetY) {
         const gridSize = 50;
-        ctx.strokeStyle = "#cccccc";
-        ctx.lineWidth = 0.5;
+        context.strokeStyle = "#cccccc";
+        context.lineWidth = 0.5;
     
         const startX = Math.floor(offsetX / gridSize) * gridSize - offsetX;
         const startY = Math.floor(offsetY / gridSize) * gridSize - offsetY;
     
         for (let x = startX; x < canvas.width; x += gridSize) {
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, canvas.height);
-            ctx.stroke();
+            context.beginPath();
+            context.moveTo(x, 0);
+            context.lineTo(x, canvas.height);
+            context.stroke();
         }
     
         for (let y = startY; y < canvas.height; y += gridSize) {
-            ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(canvas.width, y);
-            ctx.stroke();
+            context.beginPath();
+            context.moveTo(0, y);
+            context.lineTo(canvas.width, y);
+            context.stroke();
         }
     }
           
