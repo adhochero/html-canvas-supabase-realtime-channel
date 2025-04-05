@@ -13,7 +13,7 @@ window.addEventListener('load', async () => {
 
     adjustCanvasSize();
     window.onresize = adjustCanvasSize;
-    
+
 
     let lastUpdate = Date.now();
 
@@ -140,7 +140,7 @@ window.addEventListener('load', async () => {
 
         // thottle my network updates
         const now = Date.now();
-        if (moved && now - lastUpdate > 250) {
+        if (moved && now - lastUpdate > 200) {
             lastUpdate = now;
 
             // Update our presence
