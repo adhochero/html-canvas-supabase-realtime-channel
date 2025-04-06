@@ -14,6 +14,10 @@ const canvasResolutionHeight = 666;
 
 let lastUpdate = Date.now();
 
+const userImage = new Image();
+userImage.src = './assets/pixel_sphere_16x16.png'; 
+const userImageSize = 25;
+
 let users = {};
 let localUserPosition = { x: 0, y: 0 };
 const localUserId = crypto.randomUUID();
@@ -208,24 +212,31 @@ function update(timeStamp) {
         drawnPositions[id].x = lerp(drawnPositions[id].x, data.user_position.x, positionSpeed * deltaTime);
         drawnPositions[id].y = lerp(drawnPositions[id].y, data.user_position.y, positionSpeed * deltaTime);
 
-        drawUser(drawnPositions[id], id);
+        drawUser(drawnPositions[id], id, userImage, userImageSize);
     });
 
-    drawUser(localUserPosition, localUserId);
+    drawUser(localUserPosition, localUserId, userImage, userImageSize);
     context.restore();
 
     window.requestAnimationFrame(update);
 }
 
-function drawUser(userPosition, userId){
+function drawUser(userPosition, userId, image, size){
     context.beginPath();
-    context.arc(userPosition.x, userPosition.y, 10, 0, Math.PI * 2);
-    context.fillStyle = 'black';
-    context.fill();
+    context.drawImage(
+        image,
+        userPosition.x - size / 2,
+        userPosition.y - size / 2,
+        size,
+        size
+    );
+    // context.arc(userPosition.x, userPosition.y, 10, 0, Math.PI * 2);
+    // context.fillStyle = 'black';
+    // context.fill();
     context.fillStyle = 'black';
     context.font = 'bold 12px Arial';
     context.textAlign = 'center';
-    context.fillText(userId.substring(0, 6), userPosition.x, userPosition.y - 10 - 5);
+    context.fillText(userId.substring(0, 6), userPosition.x, userPosition.y - size * 3 / 4);
 }
 
 function adjustCanvasSize() {
