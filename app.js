@@ -24,6 +24,26 @@ let positionSpeed = 1.25;
 let input = new Input(canvas);
 input.addEventListeners();
 
+// Assign functions with coordinate parameters
+input.onLongPress = (x, y) => {
+    console.log(`Long press at (${x}, ${y})`);
+    // Use x and y coordinates here
+};
+
+input.onQuickPress = (x, y) => {
+    const worldX = x - camera.x; // Get real-world coordinates
+    const worldY = y - camera.y;
+
+    const closest = getClosestPlayer(worldX, worldY, 20); // Optional max range
+
+    if (closest) {
+        console.log(`Quick press: Closest player is ${closest.id} at`, closest.position);
+        // You can interact with the closest player here
+    } else {
+        console.log("No player found within range.");
+    }
+};
+
 let inputSmoothing = { x: 0, y: 0 };
 let velocity = { x: 0, y: 0 };
 let moveDirection = { x: 0, y: 0 };
@@ -247,4 +267,24 @@ function drawGrid(offsetX, offsetY) {
         context.lineTo(canvas.width, y);
         context.stroke();
     }
+}
+
+function getClosestPlayer(x, y, maxRange) {
+    let closestId = null;
+    let closestDistance = Infinity;
+
+    for (const [id, pos] of Object.entries(drawnPositions)) {
+        if (id === localUserId) continue; // Skip the local player
+
+        const dx = pos.x - x;
+        const dy = pos.y - y;
+        const distSq = dx * dx + dy * dy;
+
+        if (distSq < closestDistance && Math.sqrt(distSq) <= maxRange) {
+            closestDistance = distSq;
+            closestId = id;
+        }
+    }
+
+    return closestId ? { id: closestId, position: drawnPositions[closestId] } : null;
 }
