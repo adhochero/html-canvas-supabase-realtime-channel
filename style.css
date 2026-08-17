@@ -11,6 +11,7 @@ body{
     padding: 0;
     width: 100%;
     height: 100%;
+    background: #000;
     touch-action: none;
     -webkit-user-select: none;
     user-select: none;
@@ -18,13 +19,21 @@ body{
     -webkit-tap-highlight-color: transparent;
 }
 
-#gameCanvas{
-    background-color: rgb(200, 200, 200);
-
+/* Sized to the canvas display size by JS and centred, so children can anchor to the
+   canvas corners. */
+#stage{
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
+}
+
+#gameCanvas{
+    display: block;
+    width: 100%;
+    height: 100%;
+    background-color: rgb(200, 200, 200);
+    image-rendering: pixelated;
 }
 
 @font-face {
@@ -32,81 +41,84 @@ body{
     src: url('./assets/3x3Font.otf') format('opentype');
 }
 
-/* ── Colour picker ────────────────────────────────────────────────────────────
-   No panel chrome — the triangle and hue bar carry their own outlines. Closed, one
-   transform pushes the row right so only the triangle's tip stays on screen; JS
-   sets --closed-shift from the real geometry rather than duplicating it here. */
-#colorPicker{
+/* ── Weapon swap button (bottom-right of the canvas) ──────────────────────────── */
+#weaponButton{
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    z-index: 5;
+
+    min-width: 52px;
+    padding: 8px 10px;
+
+    font-family: '3x3', monospace;
+    font-size: 16px;
+    color: rgb(255, 53, 94);
+
+    background: rgba(0, 0, 0, 0.6);
+    border: 3px solid #000;
+    border-radius: 8px;
+
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+#weaponButton:active{
+    background: rgba(255, 53, 94, 0.25);
+}
+
+/* ── Difficulty overlay ──────────────────────────────────────────────────────── */
+#difficultyOverlay{
     position: fixed;
-    top: 50%;
-    right: 0;
-    z-index: 10;
+    inset: 0;
+    z-index: 20;
 
     display: flex;
-    align-items: flex-start;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
 
-    transform: translate(var(--closed-shift, 151px), -50%);
-    transition: transform 200ms ease-out;
-
+    background: rgba(0, 0, 0, 0.86);
     touch-action: none;
 }
 
-#colorPicker.is-open{
-    transform: translate(0, -50%);
+/* JS adds this once a difficulty is chosen. */
+#difficultyOverlay.is-hidden{
+    display: none;
 }
 
-@media (prefers-reduced-motion: reduce){
-    #colorPicker{
-        transition: none;
-    }
-}
-
-#trianglePane{
-    position: relative;
-}
-
-#colorPicker canvas{
-    display: block;
-    touch-action: none;  /* the canvases handle their own drags */
-    cursor: crosshair;
-}
-
-/* Angled to run parallel with the triangle's lower edge. JS sets the position and
-   rotation from that edge, so the two can't drift apart. */
-#hexInput{
-    position: absolute;
-    height: 14px;
-    /* width is set from the edge length in JS; centred so the text lands on the
-       edge's midpoint */
-    text-align: center;
-
-    /* 3x3 is a wide face, so this reads bigger than the number suggests */
+#difficultyOverlay h1{
     font-family: '3x3', monospace;
-    font-size: 12px;
-    line-height: 14px;
-    letter-spacing: 1px;
-    text-transform: uppercase;
+    font-size: 34px;
+    letter-spacing: 2px;
     color: rgb(255, 53, 94);
-
-    padding: 0;
-    background: transparent;
-    border: none;
-    outline: none;
-
-    /* body turns off selection and touch for the game — the hex field needs both.
-       manipulation keeps tap-to-focus but drops the double-tap-to-zoom gesture. */
-    -webkit-user-select: text;
-    user-select: text;
-    touch-action: manipulation;
-    cursor: text;
-
-    /* hidden while closed so it can't peek out beside the tip */
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 150ms ease-out;
 }
 
-#colorPicker.is-open #hexInput{
-    opacity: 1;
-    pointer-events: auto;
+#difficultyButtons{
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    width: 220px;
+}
+
+#difficultyButtons button{
+    padding: 14px;
+
+    font-family: '3x3', monospace;
+    font-size: 22px;
+    letter-spacing: 2px;
+    color: #fff;
+
+    background: rgba(255, 255, 255, 0.06);
+    border: 3px solid #fff;
+    border-radius: 10px;
+
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+#difficultyButtons button:active{
+    background: rgb(255, 53, 94);
+    border-color: rgb(255, 53, 94);
 }

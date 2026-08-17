@@ -1,8 +1,8 @@
 import { Input } from './input.js';
 import { AnimatedSprite } from './animatedSprite.js';
-import { createColorPicker, hsbToRgbString } from './colorPicker.js';
-import { TILE_PX, TILE_SIZE, SPAWN, dualGridAtlasAt } from './world.js';
+import { TILE_PX, TILE_SIZE, SPAWN, dualGridAtlasAt, setTerrain } from './world.js';
 
+const stage = document.getElementById('stage');
 const canvas = document.getElementById('gameCanvas');
 const context = canvas.getContext('2d');
 const canvasViewportPercentage = 0.9;
@@ -48,6 +48,17 @@ const shadowImage = loadImage('./assets/shadow.png');
 // 4x4 sheet of dual-grid terrain tiles, also outside the tint targets
 const terrainTiles = loadImage('./assets/DualGrid_TileSet_Grass.png');
 
+// Weapon overlay sheet: 2 columns x 3 rows of 16x16 = 6 weapons. Drawn on top of the
+// player, and NOT tinted — weapons are held items, not part of the body.
+const weaponsImage = loadImage('./assets/Weapons.png');
+const WEAPON_COLS = 2;
+const WEAPON_COUNT = 6;
+// Nudge the overlay to sit in the player's hands. X mirrors with facing; both are in
+// world units at the sprite scale, so tweak freely to line the art up.
+const WEAPON_OFFSET_X = 7;
+const WEAPON_OFFSET_Y = 2;
+let currentWeapon = -1; // -1 = none; the button cycles none -> 0..5 -> none
+
 // The character fills its frame right down to the bottom edge, so shifting it up by
 // half a frame puts its feet on the ground position — where the shadow is centred.
 const spriteFootOffset = 16 * spriteScale * 0.5;
@@ -66,9 +77,6 @@ const tintTargets = [
     { source: playerJumpImage, target: playerJumpSheet },
     ...deathImages.map((source, i) => ({ source, target: deathSheets[i] }))
 ];
-
-// Starting player colour, #ffb494 in HSB
-const DEFAULT_COLOR = { hue: 18, saturation: 42, brightness: 100 };
 
 const playerHitRadius = 24; // frame is 16px drawn at spriteScale => 48px, so half of that
 const respawnDelay = 3; // seconds to hold the last death frame before respawning
@@ -93,21 +101,6 @@ const SHADOW_MIN_JUMP_SCALE = 0.5;  // shadow's stretch span at the apex, vs gro
 const SHADOW_DEATH_SCALE_X = 1.8;   // widen to sit under the lying-down body
 const SHADOW_DEATH_DELAY_FRAMES = 2; // death frames spent still standing before the widen
 
-// Footprints. Sized in art pixels so they stay on the same grid as the sprites.
-const FOOTPRINT_WIDTH = 3 * spriteScale;
-const FOOTPRINT_HEIGHT = 2 * spriteScale;
-const FOOTPRINT_SPREAD = 5;    // world units either side of the walking line
-const FOOTPRINT_STRIDE = 25;   // world units travelled between prints
-const FOOTPRINT_HOLD = 2.5;    // seconds held at full opacity before fading at all
-const FOOTPRINT_FADE = 0.5;    // seconds to fade out once it starts
-const FOOTPRINT_LIFE = FOOTPRINT_HOLD + FOOTPRINT_FADE; // derived, so culling stays in sync
-const FOOTPRINT_OPACITY = 0.10;
-const FOOTPRINT_MAX = 80;      // oldest are dropped past this, so the array stays bounded
-
-let footprints = [];
-let strideAccumulator = 0;
-let footSide = 1;              // flips each print, so they alternate left/right
-
 let isAlive = true;
 let deathAnimatedSprite = null;
 let respawnTimer = 0;
@@ -131,21 +124,24 @@ let localUserSpeed = 150;
 let camera = { x: 0, y: 0 };
 let cameraFollowSpeed = 3;
 
-// Clicking on the character kills it
+// Tapping the character kills it; tapping the ground carves that tile to dirt.
 input.onQuickPress = (x, y) => {
-    if (!isAlive) return;
-
     // Convert from canvas space to world space
     const worldX = x - camera.x;
     const worldY = y - camera.y;
 
-    // Test against where the sprite is actually drawn — its body sits above the
-    // ground position, and rides the arc while airborne
-    const spriteCenterY = localUserPosition.y - spriteFootOffset + jumpOffsetY;
-
-    if (getSquaredDistance(localUserPosition.x, spriteCenterY, worldX, worldY) <= playerHitRadius * playerHitRadius) {
-        killPlayer();
+    if (isAlive) {
+        // Test against where the sprite is actually drawn — its body sits above the
+        // ground position, and rides the arc while airborne
+        const spriteCenterY = localUserPosition.y - spriteFootOffset + jumpOffsetY;
+        if (getSquaredDistance(localUserPosition.x, spriteCenterY, worldX, worldY) <= playerHitRadius * playerHitRadius) {
+            killPlayer();
+            return;
+        }
     }
+
+    // Otherwise turn the tapped terrain cell to dirt.
+    setTerrain(Math.floor(worldX / TILE_SIZE), Math.floor(worldY / TILE_SIZE), 0);
 };
 
 // Flicking the joystick jumps in the flicked direction
@@ -163,26 +159,48 @@ window.addEventListener('wheel', event => {
 window.addEventListener('resize', adjustCanvasSize);
 window.addEventListener('orientationchange', adjustCanvasSize);
 
+let gameStarted = false;
+
 window.addEventListener('load', async () => {
     adjustCanvasSize();
 
     // The sheets have to be decoded before they can be tinted into the offscreen canvases
     await Promise.all([
         ...tintTargets.map(({ source }) => source.decode()),
-        terrainTiles.decode()
+        terrainTiles.decode(),
+        weaponsImage.decode()
     ].map(promise => promise.catch(() => {})));
-
-    // Fires once on creation, which lays down the initial tint
-    createColorPicker({ ...DEFAULT_COLOR, onChange: applyPlayerColor });
 
     localAnimatedSprite = new AnimatedSprite(playerIdleSheet, 4, 5, 5, 4, spriteScale, 333, 333, .2, false, true, true);
 
     // Left stopped: the single frame is held for the whole jump, only the row changes
     jumpAnimatedSprite = new AnimatedSprite(playerJumpSheet, 1, 5, 5, 1, spriteScale, 333, 333, 1, false, false, false);
 
-    // Start the animation loop
-    window.requestAnimationFrame(update);
+    setupWeaponButton();
+    setupDifficulty();
 });
+
+// Each difficulty just picks the player colour; the button's data-color carries it.
+function setupDifficulty() {
+    const overlay = document.getElementById('difficultyOverlay');
+    overlay.querySelectorAll('button').forEach(button => {
+        button.addEventListener('click', () => {
+            applyPlayerColor(button.dataset.color);
+            overlay.classList.add('is-hidden');
+            if (!gameStarted) {
+                gameStarted = true;
+                window.requestAnimationFrame(update);
+            }
+        });
+    });
+}
+
+// Cycles none -> weapon 0..5 -> none.
+function setupWeaponButton() {
+    document.getElementById('weaponButton').addEventListener('click', () => {
+        currentWeapon = currentWeapon + 1 >= WEAPON_COUNT ? -1 : currentWeapon + 1;
+    });
+}
 
 function update(timeStamp) {
     const maxDeltaTime = 0.1; // Maximum time difference between frames (in seconds)
@@ -210,8 +228,6 @@ function update(timeStamp) {
         localUserPosition.y += moveDirection.y * deltaTime;
     }
 
-    updateFootprints(deltaTime);
-
     // Update camera to follow local player
     camera.x = lerp(camera.x, -localUserPosition.x + canvas.width / 2, cameraFollowSpeed * deltaTime);
     camera.y = lerp(camera.y, -localUserPosition.y + canvas.height / 2, cameraFollowSpeed * deltaTime);
@@ -230,7 +246,6 @@ function update(timeStamp) {
     // --- DRAW IN WORLD ---
 
     drawTerrain();
-    drawFootprints();
 
     // Shadow stays on the ground under the player at all times, and outside the
     // respawn flash so it holds steady while the character pulses
@@ -263,6 +278,13 @@ function update(timeStamp) {
             );
         }
 
+        // Weapon overlay tracks the body, including the jump arc and the facing flip.
+        drawWeapon(
+            localUserPosition.x,
+            localUserPosition.y - spriteFootOffset + jumpOffsetY,
+            localPlayerState.lastDirectionX
+        );
+
         context.restore();
     } else {
         deathAnimatedSprite.x = localUserPosition.x;
@@ -291,9 +313,10 @@ function adjustCanvasSize() {
     canvas.width = canvasResolutionWidth;
     canvas.height = canvasResolutionHeight;
 
-    // Set the display size (CSS pixels)
-    canvas.style.width = canvasResolutionWidth * scale + 'px';
-    canvas.style.height = canvasResolutionHeight * scale + 'px';
+    // The stage carries the display size; the canvas fills it. The weapon button
+    // anchors to the stage's corner, so it rides along.
+    stage.style.width = canvasResolutionWidth * scale + 'px';
+    stage.style.height = canvasResolutionHeight * scale + 'px';
 }
 
 function lerp(start, end, t) {
@@ -329,8 +352,8 @@ function tintSheet(source, target, color) {
     tintContext.globalCompositeOperation = 'source-over';
 }
 
-function applyPlayerColor(h, s, b) {
-    const color = hsbToRgbString(h, s, b);
+// color is any canvas fillStyle string (the difficulty buttons pass a hex).
+function applyPlayerColor(color) {
     tintTargets.forEach(({ source, target }) => tintSheet(source, target, color));
 }
 
@@ -371,60 +394,32 @@ function applyJumpPhysics(deltaTime) {
     }
 }
 
-// Prints are laid down by distance travelled rather than on a timer, so they keep an
-// even spacing no matter how fast the player is moving. Airborne and dead both stop
-// them — feet have to be on the ground to leave a mark.
-function updateFootprints(deltaTime) {
-    footprints.forEach(print => { print.age += deltaTime; });
-    if (footprints.length && footprints[0].age >= FOOTPRINT_LIFE) {
-        footprints = footprints.filter(print => print.age < FOOTPRINT_LIFE);
-    }
+// Weapon overlay, drawn on top of the player. bodyX/bodyY is the sprite's centre
+// (jump offset already folded in). The X offset mirrors with facing and the art flips,
+// so a weapon on the right hand swaps to the left when the player faces left — matching
+// how the character sprite itself is mirrored.
+function drawWeapon(bodyX, bodyY, facing) {
+    if (currentWeapon < 0 || !weaponsImage.naturalWidth) return;
 
-    if (!isAlive || !isGrounded) return;
+    const size = TILE_PX * spriteScale;
+    const srcX = (currentWeapon % WEAPON_COLS) * TILE_PX;
+    const srcY = Math.floor(currentWeapon / WEAPON_COLS) * TILE_PX;
 
-    const speed = Math.hypot(moveDirection.x, moveDirection.y);
-    if (speed <= 1) {
-        // Standing still — prime the accumulator so the first step lands immediately
-        // rather than half a stride after setting off.
-        strideAccumulator = FOOTPRINT_STRIDE;
-        return;
-    }
-
-    strideAccumulator += speed * deltaTime;
-    if (strideAccumulator < FOOTPRINT_STRIDE) return;
-    strideAccumulator -= FOOTPRINT_STRIDE;
-
-    // Offset perpendicular to travel and alternate sides, so the prints straddle the
-    // walking line as a left/right pair instead of a single centred track.
-    const dirX = moveDirection.x / speed;
-    const dirY = moveDirection.y / speed;
-    const offsetX = -dirY * FOOTPRINT_SPREAD * footSide;
-    const offsetY = dirX * FOOTPRINT_SPREAD * footSide;
-    footSide = -footSide;
-
-    // Snapping to the art-pixel grid keeps them crisp against the tiles.
-    const snap = value => Math.round(value / spriteScale) * spriteScale;
-    footprints.push({
-        x: snap(localUserPosition.x + offsetX - FOOTPRINT_WIDTH / 2),
-        y: snap(localUserPosition.y + offsetY - FOOTPRINT_HEIGHT / 2),
-        age: 0
-    });
-
-    if (footprints.length > FOOTPRINT_MAX) footprints.shift();
-}
-
-function drawFootprints() {
-    if (!footprints.length) return;
+    const flip = facing < 0;
+    const drawX = bodyX + WEAPON_OFFSET_X * (flip ? -1 : 1);
+    const drawY = bodyY + WEAPON_OFFSET_Y;
 
     context.save();
-    context.fillStyle = '#000';
-    footprints.forEach(print => {
-        // Full strength for the hold, then a quick ramp off — rather than fading
-        // from the moment it lands, which leaves the whole trail half-visible.
-        const fading = Math.max(0, print.age - FOOTPRINT_HOLD) / FOOTPRINT_FADE;
-        context.globalAlpha = FOOTPRINT_OPACITY * (1 - Math.min(1, fading));
-        context.fillRect(print.x, print.y, FOOTPRINT_WIDTH, FOOTPRINT_HEIGHT);
-    });
+    context.imageSmoothingEnabled = false;
+    if (flip) {
+        context.translate(drawX * 2, 0);
+        context.scale(-1, 1);
+    }
+    context.drawImage(
+        weaponsImage,
+        srcX, srcY, TILE_PX, TILE_PX,
+        drawX - size / 2, drawY - size / 2, size, size
+    );
     context.restore();
 }
 

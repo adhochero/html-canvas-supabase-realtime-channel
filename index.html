@@ -6,16 +6,21 @@
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <canvas id="gameCanvas"></canvas>
+  <!-- Canvas plus the weapon button share a box sized to the canvas, so the button
+       can anchor to the canvas corner rather than the viewport. -->
+  <div id="stage">
+    <canvas id="gameCanvas"></canvas>
+    <button id="weaponButton" type="button" aria-label="Swap weapon">WPN</button>
+  </div>
 
-  <!-- The triangle's own tip is the handle: closed, only that tip shows past the
-       right edge; clicking it slides the whole picker out. -->
-  <div id="colorPicker" role="group" aria-label="Colour picker">
-    <div id="trianglePane">
-      <canvas id="triangleCanvas" aria-label="Saturation and brightness"></canvas>
-      <input id="hexInput" type="text" spellcheck="false" autocomplete="off" maxlength="7" aria-label="Hex colour">
+  <!-- Shown on load; picking a difficulty sets the player colour and starts the game. -->
+  <div id="difficultyOverlay">
+    <h1>DIFFICULTY</h1>
+    <div id="difficultyButtons">
+      <button type="button" data-color="#ffb595">EASY</button>
+      <button type="button" data-color="#ffb595">MEDIUM</button>
+      <button type="button" data-color="#ffb494">HARD</button>
     </div>
-    <canvas id="hueCanvas" aria-label="Hue"></canvas>
   </div>
 
   <script type="module" src="./app.js"></script>
