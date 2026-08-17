@@ -189,6 +189,10 @@ function setupDifficulty() {
             overlay.classList.add('is-hidden');
             if (!gameStarted) {
                 gameStarted = true;
+                // Snap the camera onto the player so the first frame is already
+                // centred, instead of sliding in from the origin.
+                camera.x = -localUserPosition.x + canvas.width / 2;
+                camera.y = -localUserPosition.y + canvas.height / 2;
                 window.requestAnimationFrame(update);
             }
         });
