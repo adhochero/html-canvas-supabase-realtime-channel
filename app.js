@@ -55,8 +55,8 @@ const WEAPON_COLS = 2;
 const WEAPON_COUNT = 6;
 // Nudge the overlay to sit in the player's hands. X mirrors with facing; both are in
 // world units at the sprite scale, so tweak freely to line the art up.
-const WEAPON_OFFSET_X = 7;
-const WEAPON_OFFSET_Y = 2;
+const WEAPON_OFFSET_X = 8;
+const WEAPON_OFFSET_Y = 10;
 let currentWeapon = -1; // -1 = none; the button cycles none -> 0..5 -> none
 
 // The character fills its frame right down to the bottom edge, so shifting it up by
