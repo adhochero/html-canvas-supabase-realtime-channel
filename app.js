@@ -4,10 +4,32 @@ import { TILE_PX, TILE_SIZE, SPAWN, dualGridAtlasAt, setTerrain } from './world.
 
 const stage = document.getElementById('stage');
 const canvas = document.getElementById('gameCanvas');
-const context = canvas.getContext('2d');
+const screenCtx = canvas.getContext('2d');
 const canvasViewportPercentage = 0.9;
-const canvasResolutionWidth = 666;
-const canvasResolutionHeight = 666;
+
+// art px -> world units, and the base on-screen block size. Declared here because the
+// render buffer's dimensions are derived from it.
+const spriteScale = 3;
+
+// Pixel-perfect rendering. The world is drawn once into a low-resolution buffer at one
+// pixel per art pixel, then scaled up to the screen in a single whole-number nearest-
+// neighbour blit — so every art pixel is a uniform block and never lands on a fraction.
+// A 1px overscan border gives the sub-pixel camera room to shift the whole image each
+// frame without exposing an empty edge, which keeps slow motion smooth instead of
+// snapping a whole pixel at a time.
+const ART_VIEW = 222;                                 // art pixels across the square view
+const BUFFER_BORDER = 1;                              // overscan, in art pixels
+const BUFFER_SIZE = ART_VIEW + BUFFER_BORDER * 2;     // 224
+const HALF_VIEW_WORLD = (ART_VIEW * spriteScale) / 2; // world-space half view = 333
+
+const sceneCanvas = document.createElement('canvas');
+sceneCanvas.width = BUFFER_SIZE;
+sceneCanvas.height = BUFFER_SIZE;
+// `context` is the BUFFER context, so every existing world-draw call targets the buffer
+// unchanged; the screen only ever receives the final scaled blit.
+const context = sceneCanvas.getContext('2d');
+
+let screenScale = spriteScale; // device px per art px; recomputed in adjustCanvasSize
 
 let lastTimeStamp = 0;
 
@@ -26,8 +48,6 @@ function loadImage(src) {
 // Sprite sheets are 64x80 => 4 columns x 5 rows of 16x16 frames, 4 frames per row.
 // Rows top-to-bottom: North, North-East, East, South-East, South.
 // West directions reuse the East-side rows, flipped horizontally.
-const spriteScale = 3;
-
 const playerIdleImage = loadImage('./assets/Base_Idle_8D.png');
 const playerRunImage = loadImage('./assets/Base_Walk_8D.png');
 
@@ -55,7 +75,7 @@ const WEAPON_COLS = 2;
 const WEAPON_COUNT = 6;
 // Nudge the overlay to sit in the player's hands. X mirrors with facing; both are in
 // world units at the sprite scale, so tweak freely to line the art up.
-const WEAPON_OFFSET_X = 8;
+const WEAPON_OFFSET_X = 6;
 const WEAPON_OFFSET_Y = 10;
 let currentWeapon = -1; // -1 = none; the button cycles none -> 0..5 -> none
 
@@ -126,9 +146,9 @@ let cameraFollowSpeed = 3;
 
 // Tapping the character kills it; tapping the ground carves that tile to dirt.
 input.onQuickPress = (x, y) => {
-    // Convert from canvas space to world space
-    const worldX = x - camera.x;
-    const worldY = y - camera.y;
+    // x,y are canvas backing pixels; scale to world units, then into world space.
+    const worldX = x * spriteScale / screenScale - camera.x;
+    const worldY = y * spriteScale / screenScale - camera.y;
 
     if (isAlive) {
         // Test against where the sprite is actually drawn — its body sits above the
@@ -191,8 +211,8 @@ function setupDifficulty() {
                 gameStarted = true;
                 // Snap the camera onto the player so the first frame is already
                 // centred, instead of sliding in from the origin.
-                camera.x = -localUserPosition.x + canvas.width / 2;
-                camera.y = -localUserPosition.y + canvas.height / 2;
+                camera.x = -localUserPosition.x + HALF_VIEW_WORLD;
+                camera.y = -localUserPosition.y + HALF_VIEW_WORLD;
                 window.requestAnimationFrame(update);
             }
         });
@@ -233,19 +253,29 @@ function update(timeStamp) {
     }
 
     // Update camera to follow local player
-    camera.x = lerp(camera.x, -localUserPosition.x + canvas.width / 2, cameraFollowSpeed * deltaTime);
-    camera.y = lerp(camera.y, -localUserPosition.y + canvas.height / 2, cameraFollowSpeed * deltaTime);
+    camera.x = lerp(camera.x, -localUserPosition.x + HALF_VIEW_WORLD, cameraFollowSpeed * deltaTime);
+    camera.y = lerp(camera.y, -localUserPosition.y + HALF_VIEW_WORLD, cameraFollowSpeed * deltaTime);
 
 
-    // Set up context for this frames drawings
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    context.save();
-    context.beginPath();
+    // --- RENDER THE WORLD INTO THE LOW-RES BUFFER ---
+    // Camera in art pixels; render on a whole art-pixel and defer the leftover fraction
+    // to the blit, so the world never snaps a whole pixel at a time.
+    const camArtX = camera.x / spriteScale;
+    const camArtY = camera.y / spriteScale;
+    const floorX = Math.floor(camArtX);
+    const floorY = Math.floor(camArtY);
+    const fracX = camArtX - floorX;
+    const fracY = camArtY - floorY;
+
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, BUFFER_SIZE, BUFFER_SIZE);
+    // World units scale down to art pixels; the camera lands on a whole art-pixel plus
+    // the border. Existing draw calls stay in world units and need no changes.
+    context.setTransform(
+        1 / spriteScale, 0, 0, 1 / spriteScale,
+        floorX + BUFFER_BORDER, floorY + BUFFER_BORDER
+    );
     context.imageSmoothingEnabled = false;
-
-    // Apply camera transform. Snapping to whole pixels keeps the tile grid from
-    // showing seams between neighbouring tiles, and keeps the pixel art crisp.
-    context.translate(Math.round(camera.x), Math.round(camera.y));
 
     // --- DRAW IN WORLD ---
 
@@ -303,24 +333,47 @@ function update(timeStamp) {
         }
     }
 
-    context.restore();
+    // --- BLIT THE BUFFER TO THE SCREEN ---
+    // Whole-number scale keeps art pixels crisp; the sub-pixel remainder shifts the whole
+    // image for smooth motion, and the overscan border means the shift never uncovers an
+    // empty edge.
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    screenCtx.imageSmoothingEnabled = false;
+    screenCtx.clearRect(0, 0, canvas.width, canvas.height);
+    screenCtx.drawImage(
+        sceneCanvas,
+        (fracX - BUFFER_BORDER) * screenScale,
+        (fracY - BUFFER_BORDER) * screenScale,
+        BUFFER_SIZE * screenScale,
+        BUFFER_SIZE * screenScale
+    );
 
     window.requestAnimationFrame(update);
 }
 
 function adjustCanvasSize() {
-    let scaleX = window.innerWidth / canvasResolutionWidth;
-    let scaleY = window.innerHeight / canvasResolutionHeight;
-    let scale = Math.min(scaleX, scaleY) * canvasViewportPercentage;
+    const dpr = window.devicePixelRatio || 1;
+    const availCss = Math.min(window.innerWidth, window.innerHeight) * canvasViewportPercentage;
 
-    // Set the internal resolution (render size)
-    canvas.width = canvasResolutionWidth;
-    canvas.height = canvasResolutionHeight;
+    // Largest whole number of device pixels per art pixel that fits. A whole-number
+    // scale is what makes the upscale pixel-perfect; the remainder is left as margin.
+    screenScale = Math.max(1, Math.floor((availCss * dpr) / ART_VIEW));
+
+    // Backing store is exactly the device pixels shown, so nothing gets resampled: the
+    // canvas shows the ART_VIEW region and the buffer's border overhangs and is clipped.
+    canvas.width = ART_VIEW * screenScale;
+    canvas.height = ART_VIEW * screenScale;
+    screenCtx.imageSmoothingEnabled = false;
 
     // The stage carries the display size; the canvas fills it. The weapon button
     // anchors to the stage's corner, so it rides along.
-    stage.style.width = canvasResolutionWidth * scale + 'px';
-    stage.style.height = canvasResolutionHeight * scale + 'px';
+    const cssSize = (ART_VIEW * screenScale) / dpr;
+    stage.style.width = cssSize + 'px';
+    stage.style.height = cssSize + 'px';
+
+    // Keep the joystick's full-tilt drag a constant fraction of the view regardless of
+    // the on-screen scale.
+    input.maxJoystickRange = (100 / spriteScale) * screenScale;
 }
 
 function lerp(start, end, t) {
@@ -609,14 +662,17 @@ function respawnPlayer() {
 function drawTerrain() {
     if (!terrainTiles.naturalWidth) return; // not decoded yet
 
-    const left = -Math.round(camera.x);
-    const top = -Math.round(camera.y);
+    const left = -camera.x;
+    const top = -camera.y;
     const half = TILE_SIZE / 2;
+    // World units the buffer covers; pad a tile each side so the sub-pixel shift and the
+    // overscan border can never reveal an unfilled cell.
+    const viewWorld = BUFFER_SIZE * spriteScale;
 
-    const startCol = Math.floor((left - half) / TILE_SIZE);
-    const endCol = Math.ceil((left + canvas.width + half) / TILE_SIZE);
-    const startRow = Math.floor((top - half) / TILE_SIZE);
-    const endRow = Math.ceil((top + canvas.height + half) / TILE_SIZE);
+    const startCol = Math.floor((left - half - TILE_SIZE) / TILE_SIZE);
+    const endCol = Math.ceil((left + viewWorld + half + TILE_SIZE) / TILE_SIZE);
+    const startRow = Math.floor((top - half - TILE_SIZE) / TILE_SIZE);
+    const endRow = Math.ceil((top + viewWorld + half + TILE_SIZE) / TILE_SIZE);
 
     for (let row = startRow; row <= endRow; row++) {
         for (let col = startCol; col <= endCol; col++) {
