@@ -6,20 +6,20 @@
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <!-- Canvas plus the weapon button share a box sized to the canvas, so the button
-       can anchor to the canvas corner rather than the viewport. -->
+  <!-- Canvas, weapon button and difficulty overlay share a box sized to the canvas, so
+       they anchor to the canvas rather than the viewport. -->
   <div id="stage">
     <canvas id="gameCanvas"></canvas>
     <button id="weaponButton" type="button" aria-label="Swap weapon">WPN</button>
-  </div>
 
-  <!-- Shown on load; picking a difficulty sets the player colour and starts the game. -->
-  <div id="difficultyOverlay">
-    <h1>DIFFICULTY</h1>
-    <div id="difficultyButtons">
-      <button type="button" data-color="#ffb595">EASY</button>
-      <button type="button" data-color="#ba826a">MEDIUM</button>
-      <button type="button" data-color="#7a5440">HARD</button>
+    <!-- Shown on load; picking a difficulty sets the player colour and starts the game. -->
+    <div id="difficultyOverlay">
+      <h1>DIFFICULTY</h1>
+      <div id="difficultyButtons">
+        <button type="button" data-color="#ffb595">EASY</button>
+        <button type="button" data-color="#ba826a">MEDIUM</button>
+        <button type="button" data-color="#7a5440">HARD</button>
+      </div>
     </div>
   </div>
 

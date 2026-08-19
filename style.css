@@ -69,7 +69,7 @@ body{
 
 /* ── Difficulty overlay ──────────────────────────────────────────────────────── */
 #difficultyOverlay{
-    position: fixed;
+    position: absolute; /* fills the stage, so it's contained to the canvas */
     inset: 0;
     z-index: 20;
 
