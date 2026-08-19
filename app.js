@@ -31,6 +31,37 @@ const context = sceneCanvas.getContext('2d');
 
 let screenScale = spriteScale; // device px per art px; recomputed in adjustCanvasSize
 
+// Difficulty menu, drawn into the buffer at art-pixel scale so it sits on the same pixel
+// grid as the game and upscales identically — the text is sized in art pixels, not CSS.
+// Centre of the visible region in buffer coordinates (border + half the view).
+const MENU_CENTER = BUFFER_BORDER + ART_VIEW / 2;
+const MENU_TITLE_PX = 15;   // art pixels tall
+const MENU_LABEL_PX = 11;
+const MENU_BTN_W = 108;
+const MENU_BTN_H = 24;
+const MENU_BTN_GAP = 9;
+const MENU_TITLE_Y = MENU_CENTER - 54;
+const MENU_BTN_Y0 = MENU_CENTER - 16;   // centre of the first button
+
+const MENU_BUTTONS = [
+    { label: 'EASY',   color: '#ffb595' },
+    { label: 'MEDIUM', color: '#ba826a' },
+    { label: 'HARD',   color: '#7a5440' }
+];
+
+function menuButtonCenterY(index) {
+    return MENU_BTN_Y0 + index * (MENU_BTN_H + MENU_BTN_GAP);
+}
+
+// On-canvas weapon-swap button, drawn in the buffer's bottom-right corner during play.
+// Coordinates are the visible region's bottom-right (border + view) minus a margin.
+const WPN_BTN_W = 34;
+const WPN_BTN_H = 16;
+const WPN_BTN_MARGIN = 7;
+const WPN_LABEL_PX = 9;
+const WPN_BTN_X = BUFFER_BORDER + ART_VIEW - WPN_BTN_MARGIN - WPN_BTN_W; // left edge
+const WPN_BTN_Y = BUFFER_BORDER + ART_VIEW - WPN_BTN_MARGIN - WPN_BTN_H; // top edge
+
 let lastTimeStamp = 0;
 
 let localUserPosition = { x: SPAWN.x, y: SPAWN.y };
@@ -154,6 +185,31 @@ let cameraFollowSpeed = 3;
 
 // Tapping the character kills it; tapping the ground carves that tile to dirt.
 input.onQuickPress = (x, y) => {
+    // Menu: hit-test the buttons in buffer (art) space. The camera is 0 in the menu, so a
+    // backing pixel maps to art with just the scale and border.
+    if (gameState === 'menu') {
+        const artX = x / screenScale + BUFFER_BORDER;
+        const artY = y / screenScale + BUFFER_BORDER;
+        for (let i = 0; i < MENU_BUTTONS.length; i++) {
+            if (Math.abs(artX - MENU_CENTER) <= MENU_BTN_W / 2 &&
+                Math.abs(artY - menuButtonCenterY(i)) <= MENU_BTN_H / 2) {
+                startGame(MENU_BUTTONS[i].color);
+                return;
+            }
+        }
+        return;
+    }
+
+    // The weapon button is fixed UI in buffer space; a backing pixel maps to art with the
+    // scale and border (the sub-pixel camera offset is under a pixel, negligible here).
+    const uiX = x / screenScale + BUFFER_BORDER;
+    const uiY = y / screenScale + BUFFER_BORDER;
+    if (uiX >= WPN_BTN_X && uiX <= WPN_BTN_X + WPN_BTN_W &&
+        uiY >= WPN_BTN_Y && uiY <= WPN_BTN_Y + WPN_BTN_H) {
+        cycleWeapon();
+        return;
+    }
+
     // x,y are canvas backing pixels; scale to world units, then into world space.
     const worldX = x * spriteScale / screenScale - camera.x;
     const worldY = y * spriteScale / screenScale - camera.y;
@@ -187,7 +243,7 @@ window.addEventListener('wheel', event => {
 window.addEventListener('resize', adjustCanvasSize);
 window.addEventListener('orientationchange', adjustCanvasSize);
 
-let gameStarted = false;
+let gameState = 'menu'; // 'menu' until a difficulty is picked, then 'playing'
 
 window.addEventListener('load', async () => {
     adjustCanvasSize();
@@ -199,45 +255,115 @@ window.addEventListener('load', async () => {
         weaponsImage.decode()
     ].map(promise => promise.catch(() => {})));
 
+    // The pixel font has to be ready before the menu draws its text.
+    if (document.fonts && document.fonts.load) {
+        await document.fonts.load(`${MENU_TITLE_PX}px "3x3"`).catch(() => {});
+    }
+
     localAnimatedSprite = new AnimatedSprite(playerIdleSheet, 4, 5, 5, 4, spriteScale, 333, 333, .2, false, true, true);
 
     // Left stopped: the single frame is held for the whole jump, only the row changes
     jumpAnimatedSprite = new AnimatedSprite(playerJumpSheet, 1, 5, 5, 1, spriteScale, 333, 333, 1, false, false, false);
 
-    setupWeaponButton();
-    setupDifficulty();
+    // The loop starts in the menu state and renders the difficulty screen until a pick.
+    window.requestAnimationFrame(update);
 });
 
-// Each difficulty just picks the player colour; the button's data-color carries it.
-function setupDifficulty() {
-    const overlay = document.getElementById('difficultyOverlay');
-    overlay.querySelectorAll('button').forEach(button => {
-        button.addEventListener('click', () => {
-            applyPlayerColor(button.dataset.color);
-            overlay.classList.add('is-hidden');
-            if (!gameStarted) {
-                gameStarted = true;
-                // Snap the camera onto the player so the first frame is already
-                // centred, instead of sliding in from the origin.
-                camera.x = -localUserPosition.x + HALF_VIEW_WORLD;
-                camera.y = -localUserPosition.y + HALF_VIEW_WORLD;
-                window.requestAnimationFrame(update);
-            }
-        });
+// Leaves the menu for the picked difficulty: sets the player colour, reveals the weapon
+// button, and snaps the camera onto the player so the first frame is already centred.
+function startGame(color) {
+    applyPlayerColor(color);
+    gameState = 'playing';
+    camera.x = -localUserPosition.x + HALF_VIEW_WORLD;
+    camera.y = -localUserPosition.y + HALF_VIEW_WORLD;
+}
+
+// Draws the difficulty menu into the buffer at art-pixel scale, so it scales with the
+// canvas exactly like the game does. Text positions are rounded to whole art pixels to
+// keep the pixel font aligned to the grid.
+function drawMenu() {
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.imageSmoothingEnabled = false;
+    context.clearRect(0, 0, BUFFER_SIZE, BUFFER_SIZE);
+
+    context.fillStyle = '#0a0a0a';
+    context.fillRect(0, 0, BUFFER_SIZE, BUFFER_SIZE);
+
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+
+    context.fillStyle = 'rgb(255, 53, 94)';
+    context.font = `${MENU_TITLE_PX}px "3x3", monospace`;
+    context.fillText('DIFFICULTY', Math.round(MENU_CENTER), Math.round(MENU_TITLE_Y));
+
+    MENU_BUTTONS.forEach((button, index) => {
+        const cy = menuButtonCenterY(index);
+        const x = Math.round(MENU_CENTER - MENU_BTN_W / 2);
+        const y = Math.round(cy - MENU_BTN_H / 2);
+
+        context.fillStyle = '#000';
+        context.fillRect(x - 2, y - 2, MENU_BTN_W + 4, MENU_BTN_H + 4);
+        context.fillStyle = '#161616';
+        context.fillRect(x, y, MENU_BTN_W, MENU_BTN_H);
+
+        context.fillStyle = 'rgb(255, 53, 94)';
+        context.font = `${MENU_LABEL_PX}px "3x3", monospace`;
+        context.fillText(button.label, Math.round(MENU_CENTER), Math.round(cy));
     });
 }
 
+// Whole-number scale keeps art pixels crisp; the sub-pixel remainder shifts the whole
+// image for smooth motion, and the overscan border means the shift never uncovers an
+// empty edge. The menu passes 0,0 (no camera).
+function blitBufferToScreen(fracX, fracY) {
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    screenCtx.imageSmoothingEnabled = false;
+    screenCtx.clearRect(0, 0, canvas.width, canvas.height);
+    screenCtx.drawImage(
+        sceneCanvas,
+        (fracX - BUFFER_BORDER) * screenScale,
+        (fracY - BUFFER_BORDER) * screenScale,
+        BUFFER_SIZE * screenScale,
+        BUFFER_SIZE * screenScale
+    );
+}
+
 // Cycles none -> weapon 0..5 -> none.
-function setupWeaponButton() {
-    document.getElementById('weaponButton').addEventListener('click', () => {
-        currentWeapon = currentWeapon + 1 >= WEAPON_COUNT ? -1 : currentWeapon + 1;
-    });
+// Cycles none -> weapon 0..5 -> none.
+function cycleWeapon() {
+    currentWeapon = currentWeapon + 1 >= WEAPON_COUNT ? -1 : currentWeapon + 1;
+}
+
+// Draws the on-canvas weapon button into the buffer with an identity transform, so it
+// sits fixed in the corner rather than moving with the world.
+function drawWeaponButton() {
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.imageSmoothingEnabled = false;
+
+    context.fillStyle = '#000';
+    context.fillRect(WPN_BTN_X - 2, WPN_BTN_Y - 2, WPN_BTN_W + 4, WPN_BTN_H + 4);
+    context.fillStyle = '#161616';
+    context.fillRect(WPN_BTN_X, WPN_BTN_Y, WPN_BTN_W, WPN_BTN_H);
+
+    context.fillStyle = 'rgb(255, 53, 94)';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.font = `${WPN_LABEL_PX}px "3x3", monospace`;
+    context.fillText('WPN', Math.round(WPN_BTN_X + WPN_BTN_W / 2), Math.round(WPN_BTN_Y + WPN_BTN_H / 2));
 }
 
 function update(timeStamp) {
     const maxDeltaTime = 0.1; // Maximum time difference between frames (in seconds)
     const deltaTime = Math.min((timeStamp - lastTimeStamp) / 1000, maxDeltaTime);
     lastTimeStamp = timeStamp;
+
+    // Menu is drawn through the same buffer as the game, then blit with no camera offset.
+    if (gameState === 'menu') {
+        drawMenu();
+        blitBufferToScreen(0, 0);
+        window.requestAnimationFrame(update);
+        return;
+    }
 
     // A dead character ignores input until it respawns
     const inputDirection = isAlive ? input.getJoystickValues() : { x: 0, y: 0 };
@@ -351,20 +477,11 @@ function update(timeStamp) {
         }
     }
 
+    // Fixed-position UI on top of the world, still inside the buffer.
+    drawWeaponButton();
+
     // --- BLIT THE BUFFER TO THE SCREEN ---
-    // Whole-number scale keeps art pixels crisp; the sub-pixel remainder shifts the whole
-    // image for smooth motion, and the overscan border means the shift never uncovers an
-    // empty edge.
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    screenCtx.imageSmoothingEnabled = false;
-    screenCtx.clearRect(0, 0, canvas.width, canvas.height);
-    screenCtx.drawImage(
-        sceneCanvas,
-        (fracX - BUFFER_BORDER) * screenScale,
-        (fracY - BUFFER_BORDER) * screenScale,
-        BUFFER_SIZE * screenScale,
-        BUFFER_SIZE * screenScale
-    );
+    blitBufferToScreen(fracX, fracY);
 
     window.requestAnimationFrame(update);
 }
