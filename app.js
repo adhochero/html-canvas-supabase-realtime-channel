@@ -5,7 +5,7 @@ import { TILE_PX, TILE_SIZE, SPAWN, dualGridAtlasAt, setTerrain } from './world.
 const stage = document.getElementById('stage');
 const canvas = document.getElementById('gameCanvas');
 const screenCtx = canvas.getContext('2d');
-const canvasViewportPercentage = 0.9;
+const canvasViewportPercentage = 1; // fill the smaller screen dimension
 
 // art px -> world units, and the base on-screen block size. Declared here because the
 // render buffer's dimensions are derived from it.
@@ -307,8 +307,9 @@ function update(timeStamp) {
         context.globalAlpha = getRespawnFlashAlpha(deltaTime);
 
         const weaponBodyY = localUserPosition.y - spriteFootOffset + jumpOffsetY;
-        // Facing west tucks the weapon behind the player; facing east puts it in front.
-        const weaponBehind = facingX < 0;
+        // Facing more north (upward) tucks the weapon behind the player; facing south
+        // (downward, or level) puts it in front.
+        const weaponBehind = facingY < 0;
 
         if (weaponBehind) drawWeapon(localUserPosition.x, weaponBodyY);
 
@@ -470,7 +471,7 @@ function applyJumpPhysics(deltaTime) {
 
 // Weapon overlay. bodyX/bodyY is the sprite's centre (jump offset already folded in).
 // The east-pointing art is rotated to the player's facing; whether it draws in front of
-// or behind the player is decided by the caller from the facing's horizontal component.
+// or behind the player is decided by the caller from the facing's vertical component.
 function drawWeapon(bodyX, bodyY) {
     if (currentWeapon < 0 || !weaponsImage.naturalWidth) return;
 
