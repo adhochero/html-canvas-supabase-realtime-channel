@@ -73,11 +73,18 @@ const terrainTiles = loadImage('./assets/DualGrid_TileSet_Grass.png');
 const weaponsImage = loadImage('./assets/Weapons.png');
 const WEAPON_COLS = 2;
 const WEAPON_COUNT = 6;
-// Nudge the overlay to sit in the player's hands. X mirrors with facing; both are in
-// world units at the sprite scale, so tweak freely to line the art up.
-const WEAPON_OFFSET_X = 6;
-const WEAPON_OFFSET_Y = 10;
-let currentWeapon = -1; // -1 = none; the button cycles none -> 0..5 -> none
+// The weapon rotates to aim at the pointer. The art points east, so it's rotated by the
+// angle from the grip to the pointer. The pivot is the grip (near the hands) and reach
+// pushes the weapon out along the aim. All in world units — tweak to line the art up.
+const WEAPON_PIVOT_X = 0;   // grip offset from the body centre
+const WEAPON_PIVOT_Y = 8;   // grip vertical offset (roughly the hands)
+const WEAPON_REACH = 6;     // how far the weapon centre sits out along the aim
+let currentWeapon = -1;     // -1 = none; the button cycles none -> 0..5 -> none
+
+// Latest pointer position, tracked for weapon aim. Defaults to the screen centre so the
+// weapon has a sensible heading before the pointer first moves.
+let aimClientX = window.innerWidth / 2;
+let aimClientY = window.innerHeight / 2;
 
 // The character fills its frame right down to the bottom edge, so shifting it up by
 // half a frame puts its feet on the ground position — where the shadow is centred.
@@ -168,6 +175,16 @@ input.onQuickPress = (x, y) => {
 input.onFlick = (directionX, directionY) => {
     triggerJump(directionX, directionY);
 };
+
+// Track the pointer for weapon aim — hover on desktop, the active drag/tap on touch.
+window.addEventListener('pointermove', event => {
+    aimClientX = event.clientX;
+    aimClientY = event.clientY;
+});
+window.addEventListener('pointerdown', event => {
+    aimClientX = event.clientX;
+    aimClientY = event.clientY;
+});
 
 // Touch pinch is already off via touch-action on the body, and the viewport meta
 // covers the zoom iOS does when you focus a text field. Trackpad pinch is the one
@@ -312,11 +329,10 @@ function update(timeStamp) {
             );
         }
 
-        // Weapon overlay tracks the body, including the jump arc and the facing flip.
+        // Weapon overlay tracks the body (including the jump arc) and rotates to aim.
         drawWeapon(
             localUserPosition.x,
-            localUserPosition.y - spriteFootOffset + jumpOffsetY,
-            localPlayerState.lastDirectionX
+            localUserPosition.y - spriteFootOffset + jumpOffsetY
         );
 
         context.restore();
@@ -455,27 +471,31 @@ function applyJumpPhysics(deltaTime) {
 // (jump offset already folded in). The X offset mirrors with facing and the art flips,
 // so a weapon on the right hand swaps to the left when the player faces left — matching
 // how the character sprite itself is mirrored.
-function drawWeapon(bodyX, bodyY, facing) {
+function drawWeapon(bodyX, bodyY) {
     if (currentWeapon < 0 || !weaponsImage.naturalWidth) return;
 
     const size = TILE_PX * spriteScale;
     const srcX = (currentWeapon % WEAPON_COLS) * TILE_PX;
     const srcY = Math.floor(currentWeapon / WEAPON_COLS) * TILE_PX;
 
-    const flip = facing < 0;
-    const drawX = bodyX + WEAPON_OFFSET_X * (flip ? -1 : 1);
-    const drawY = bodyY + WEAPON_OFFSET_Y;
+    // Rotate the east-pointing art by the angle from the grip to the pointer.
+    const pivotX = bodyX + WEAPON_PIVOT_X;
+    const pivotY = bodyY + WEAPON_PIVOT_Y;
+    const aim = clientToWorld(aimClientX, aimClientY);
+    const angle = Math.atan2(aim.y - pivotY, aim.x - pivotX);
 
     context.save();
     context.imageSmoothingEnabled = false;
-    if (flip) {
-        context.translate(drawX * 2, 0);
-        context.scale(-1, 1);
-    }
+    context.translate(pivotX, pivotY);
+    context.rotate(angle);
+    // Aiming left would otherwise leave the weapon belly-up; mirror it vertically so its
+    // top stays up while still pointing along the aim.
+    if (Math.cos(angle) < 0) context.scale(1, -1);
+    context.translate(WEAPON_REACH, 0);
     context.drawImage(
         weaponsImage,
         srcX, srcY, TILE_PX, TILE_PX,
-        drawX - size / 2, drawY - size / 2, size, size
+        -size / 2, -size / 2, size, size
     );
     context.restore();
 }
@@ -566,6 +586,18 @@ function getSquaredDistance(x1, y1, x2, y2) {
     const dx = x1 - x2;
     const dy = y1 - y2;
     return dx * dx + dy * dy;
+}
+
+// Maps a viewport (client) point to world space, accounting for the canvas backing
+// size and the on-screen pixel scale — the inverse of the render pipeline.
+function clientToWorld(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const backingX = (clientX - rect.left) * (canvas.width / rect.width);
+    const backingY = (clientY - rect.top) * (canvas.height / rect.height);
+    return {
+        x: backingX * spriteScale / screenScale - camera.x,
+        y: backingY * spriteScale / screenScale - camera.y
+    };
 }
 
 // Sheet row for a heading. Idle, walk and jump all share this row order:
