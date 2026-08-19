@@ -35,8 +35,10 @@ let screenScale = spriteScale; // device px per art px; recomputed in adjustCanv
 // grid as the game and upscales identically — the text is sized in art pixels, not CSS.
 // Centre of the visible region in buffer coordinates (border + half the view).
 const MENU_CENTER = BUFFER_BORDER + ART_VIEW / 2;
+// The 3x3 font renders cleanest at multiples of 3 art pixels (its pixel grid); off-grid
+// sizes blur, which is magnified by the buffer upscale. Keep every text size on that grid.
 const MENU_TITLE_PX = 15;   // art pixels tall
-const MENU_LABEL_PX = 11;
+const MENU_LABEL_PX = 12;
 const MENU_BTN_W = 108;
 const MENU_BTN_H = 24;
 const MENU_BTN_GAP = 9;
@@ -240,8 +242,15 @@ window.addEventListener('wheel', event => {
     if (event.ctrlKey || event.metaKey) event.preventDefault();
 }, { passive: false });
 
-window.addEventListener('resize', adjustCanvasSize);
-window.addEventListener('orientationchange', adjustCanvasSize);
+// Refit and re-centre on any viewport change. A ResizeObserver catches everything the
+// resize event can miss — rotations that fire before the dimensions settle, mobile
+// URL-bar show/hide, zoom — and fires once when observation starts for the initial sizing.
+if (window.ResizeObserver) {
+    new ResizeObserver(adjustCanvasSize).observe(document.documentElement);
+} else {
+    window.addEventListener('resize', adjustCanvasSize);
+    window.addEventListener('orientationchange', adjustCanvasSize);
+}
 
 let gameState = 'menu'; // 'menu' until a difficulty is picked, then 'playing'
 
