@@ -43,8 +43,9 @@ const MENU_BTN_W = 102;
 const MENU_BTN_H = 20;
 const MENU_BTN_GAP = 6;
 const MENU_TITLE_Y = 24;         // buffer y of the title
-const MENU_PREVIEW_Y = 68;       // centre of the live sprite preview
-const MENU_PREVIEW_SCALE = 2.5;  // source px -> art px for the preview (16 -> 40 tall)
+const MENU_PREVIEW_Y = 66;       // centre of the live sprite preview
+const MENU_PREVIEW_SCALE = 3;    // whole-number scale (matches the game) so each source
+                                 // pixel is a uniform block; 2.5 made some pixels uneven
 const MENU_BTN_Y0 = 110;         // centre of the first difficulty button
 const MENU_CONFIRM_W = 102;
 const MENU_CONFIRM_H = 24;
