@@ -39,17 +39,26 @@ const MENU_CENTER = BUFFER_BORDER + ART_VIEW / 2;
 // sizes blur, which is magnified by the buffer upscale. Keep every text size on that grid.
 const MENU_TITLE_PX = 15;   // art pixels tall
 const MENU_LABEL_PX = 12;
-const MENU_BTN_W = 108;
-const MENU_BTN_H = 24;
-const MENU_BTN_GAP = 9;
-const MENU_TITLE_Y = MENU_CENTER - 54;
-const MENU_BTN_Y0 = MENU_CENTER - 16;   // centre of the first button
+const MENU_BTN_W = 102;
+const MENU_BTN_H = 20;
+const MENU_BTN_GAP = 6;
+const MENU_TITLE_Y = 24;         // buffer y of the title
+const MENU_PREVIEW_Y = 68;       // centre of the live sprite preview
+const MENU_PREVIEW_SCALE = 2.5;  // source px -> art px for the preview (16 -> 40 tall)
+const MENU_BTN_Y0 = 110;         // centre of the first difficulty button
+const MENU_CONFIRM_W = 102;
+const MENU_CONFIRM_H = 24;
+const MENU_CONFIRM_Y = 198;      // centre of the confirm button
+const MENU_PINK = 'rgb(255, 53, 94)';
 
 const MENU_BUTTONS = [
     { label: 'EASY',   color: '#ffb595' },
     { label: 'MEDIUM', color: '#ba826a' },
     { label: 'HARD',   color: '#7a5440' }
 ];
+
+let selectedDifficulty = 0; // easy preselected; the confirm button commits it
+let previewSprite;          // idle sprite shown in the menu, tinted by the selection
 
 function menuButtonCenterY(index) {
     return MENU_BTN_Y0 + index * (MENU_BTN_H + MENU_BTN_GAP);
@@ -192,10 +201,20 @@ input.onQuickPress = (x, y) => {
     if (gameState === 'menu') {
         const artX = x / screenScale + BUFFER_BORDER;
         const artY = y / screenScale + BUFFER_BORDER;
+
+        // Confirm button commits the current selection and enters the game.
+        if (Math.abs(artX - MENU_CENTER) <= MENU_CONFIRM_W / 2 &&
+            Math.abs(artY - MENU_CONFIRM_Y) <= MENU_CONFIRM_H / 2) {
+            startGame(MENU_BUTTONS[selectedDifficulty].color);
+            return;
+        }
+
+        // Difficulty buttons only change the selection and re-tint the preview.
         for (let i = 0; i < MENU_BUTTONS.length; i++) {
             if (Math.abs(artX - MENU_CENTER) <= MENU_BTN_W / 2 &&
                 Math.abs(artY - menuButtonCenterY(i)) <= MENU_BTN_H / 2) {
-                startGame(MENU_BUTTONS[i].color);
+                selectedDifficulty = i;
+                applyPlayerColor(MENU_BUTTONS[i].color);
                 return;
             }
         }
@@ -274,6 +293,13 @@ window.addEventListener('load', async () => {
     // Left stopped: the single frame is held for the whole jump, only the row changes
     jumpAnimatedSprite = new AnimatedSprite(playerJumpSheet, 1, 5, 5, 1, spriteScale, 333, 333, 1, false, false, false);
 
+    // Menu preview: the idle sprite facing the camera (row 5 = South), drawn from the same
+    // tinted sheet, so re-tinting on a difficulty pick recolours it live.
+    previewSprite = new AnimatedSprite(playerIdleSheet, 4, 5, 5, 4, MENU_PREVIEW_SCALE, MENU_CENTER, MENU_PREVIEW_Y, 0.2, false, true, true);
+
+    // Easy is preselected, so tint everything with it up front.
+    applyPlayerColor(MENU_BUTTONS[selectedDifficulty].color);
+
     // The loop starts in the menu state and renders the difficulty screen until a pick.
     window.requestAnimationFrame(update);
 });
@@ -301,24 +327,46 @@ function drawMenu() {
     context.textAlign = 'center';
     context.textBaseline = 'middle';
 
-    context.fillStyle = 'rgb(255, 53, 94)';
+    context.fillStyle = MENU_PINK;
     context.font = `${MENU_TITLE_PX}px "3x3", monospace`;
     context.fillText('DIFFICULTY', Math.round(MENU_CENTER), Math.round(MENU_TITLE_Y));
 
+    // Live sprite preview, tinted with the current selection.
+    if (previewSprite) {
+        previewSprite.x = MENU_CENTER;
+        previewSprite.y = MENU_PREVIEW_Y;
+        previewSprite.drawSprite(context);
+    }
+
+    // Difficulty buttons. The selected one gets a thicker pink border and bright label;
+    // the rest are dimmed, so the current pick reads at a glance.
     MENU_BUTTONS.forEach((button, index) => {
         const cy = menuButtonCenterY(index);
         const x = Math.round(MENU_CENTER - MENU_BTN_W / 2);
         const y = Math.round(cy - MENU_BTN_H / 2);
+        const selected = index === selectedDifficulty;
 
-        context.fillStyle = '#000';
-        context.fillRect(x - 2, y - 2, MENU_BTN_W + 4, MENU_BTN_H + 4);
-        context.fillStyle = '#161616';
+        const border = selected ? 3 : 2;
+        context.fillStyle = selected ? MENU_PINK : '#000';
+        context.fillRect(x - border, y - border, MENU_BTN_W + 2 * border, MENU_BTN_H + 2 * border);
+        context.fillStyle = selected ? '#241016' : '#161616';
         context.fillRect(x, y, MENU_BTN_W, MENU_BTN_H);
 
-        context.fillStyle = 'rgb(255, 53, 94)';
+        context.fillStyle = selected ? MENU_PINK : 'rgb(120, 120, 120)';
         context.font = `${MENU_LABEL_PX}px "3x3", monospace`;
         context.fillText(button.label, Math.round(MENU_CENTER), Math.round(cy));
     });
+
+    // Confirm button: pink-filled with dark text, so it reads as the action that commits.
+    const confirmX = Math.round(MENU_CENTER - MENU_CONFIRM_W / 2);
+    const confirmY = Math.round(MENU_CONFIRM_Y - MENU_CONFIRM_H / 2);
+    context.fillStyle = '#000';
+    context.fillRect(confirmX - 2, confirmY - 2, MENU_CONFIRM_W + 4, MENU_CONFIRM_H + 4);
+    context.fillStyle = MENU_PINK;
+    context.fillRect(confirmX, confirmY, MENU_CONFIRM_W, MENU_CONFIRM_H);
+    context.fillStyle = '#0a0a0a';
+    context.font = `${MENU_LABEL_PX}px "3x3", monospace`;
+    context.fillText('NEXT', Math.round(MENU_CENTER), Math.round(MENU_CONFIRM_Y));
 }
 
 // Whole-number scale keeps art pixels crisp; the sub-pixel remainder shifts the whole
@@ -368,6 +416,7 @@ function update(timeStamp) {
 
     // Menu is drawn through the same buffer as the game, then blit with no camera offset.
     if (gameState === 'menu') {
+        if (previewSprite) previewSprite.update(deltaTime);
         drawMenu();
         blitBufferToScreen(0, 0);
         window.requestAnimationFrame(update);
