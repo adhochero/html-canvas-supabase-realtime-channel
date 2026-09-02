@@ -25,9 +25,13 @@ const HALF_VIEW_WORLD = (ART_VIEW * spriteScale) / 2; // world-space half view =
 const sceneCanvas = document.createElement('canvas');
 sceneCanvas.width = BUFFER_SIZE;
 sceneCanvas.height = BUFFER_SIZE;
-// `context` is the BUFFER context, so every existing world-draw call targets the buffer
-// unchanged; the screen only ever receives the final scaled blit.
-const context = sceneCanvas.getContext('2d');
+const bufferCtx = sceneCanvas.getContext('2d');
+
+// `context` is retargeted each frame: the low-res BUFFER for the pixel-perfect world and
+// UI, then the SCREEN for the character. Drawing the character straight to the screen at
+// its true sub-pixel position is what makes its motion smooth instead of snapping to the
+// art grid. The draw helpers all reference this, so pointing it swaps their target.
+let context = bufferCtx;
 
 let screenScale = spriteScale; // device px per art px; recomputed in adjustCanvasSize
 
@@ -417,6 +421,7 @@ function update(timeStamp) {
 
     // Menu is drawn through the same buffer as the game, then blit with no camera offset.
     if (gameState === 'menu') {
+        context = bufferCtx;
         if (previewSprite) previewSprite.update(deltaTime);
         drawMenu();
         blitBufferToScreen(0, 0);
@@ -458,7 +463,7 @@ function update(timeStamp) {
     camera.y = lerp(camera.y, -localUserPosition.y + HALF_VIEW_WORLD, cameraFollowSpeed * deltaTime);
 
 
-    // --- RENDER THE WORLD INTO THE LOW-RES BUFFER ---
+    // --- WORLD + UI INTO THE LOW-RES BUFFER (crisp, and scrolls smoothly via the blit) ---
     // Camera in art pixels; render on a whole art-pixel and defer the leftover fraction
     // to the blit, so the world never snaps a whole pixel at a time.
     const camArtX = camera.x / spriteScale;
@@ -468,6 +473,7 @@ function update(timeStamp) {
     const fracX = camArtX - floorX;
     const fracY = camArtY - floorY;
 
+    context = bufferCtx;
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, BUFFER_SIZE, BUFFER_SIZE);
     // World units scale down to art pixels; the camera lands on a whole art-pixel plus
@@ -478,16 +484,23 @@ function update(timeStamp) {
     );
     context.imageSmoothingEnabled = false;
 
-    // --- DRAW IN WORLD ---
-
     drawTerrain();
+    drawWeaponButton(); // fixed corner UI, on the buffer's pixel grid
+    blitBufferToScreen(fracX, fracY);
 
-    // Shadow stays on the ground under the player at all times, and outside the
-    // respawn flash so it holds steady while the character pulses
+    // --- CHARACTER ONTO THE SCREEN (drawn at its true sub-pixel position, so it moves
+    // smoothly rather than snapping to the art grid). Same world->device mapping as the
+    // blit but with the TRUE, unfloored camera. Each source pixel still lands on a whole
+    // screenScale-sized block, so the sprite stays crisp — only its position is sub-pixel.
+    context = screenCtx;
+    const viewScale = screenScale / spriteScale;
+    context.setTransform(viewScale, 0, 0, viewScale, camera.x * viewScale, camera.y * viewScale);
+    context.imageSmoothingEnabled = false;
+
+    // Shadow rides under the player, outside the respawn flash so it holds steady.
     drawShadow(localUserPosition.x, localUserPosition.y);
 
     if (isAlive) {
-        // Draw local player, pulsing if it just respawned
         context.save();
         context.globalAlpha = getRespawnFlashAlpha(deltaTime);
 
@@ -536,11 +549,7 @@ function update(timeStamp) {
         }
     }
 
-    // Fixed-position UI on top of the world, still inside the buffer.
-    drawWeaponButton();
-
-    // --- BLIT THE BUFFER TO THE SCREEN ---
-    blitBufferToScreen(fracX, fracY);
+    context.setTransform(1, 0, 0, 1, 0, 0);
 
     window.requestAnimationFrame(update);
 }
