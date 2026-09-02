@@ -98,6 +98,11 @@ function loadImage(src) {
 const playerIdleImage = loadImage('./assets/Base_Idle_8D.png');
 const playerRunImage = loadImage('./assets/Base_Walk_8D.png');
 
+// Head overlay (64x80, same 4x5 layout as idle/walk) drawn on top of the body during
+// those two animations, frame-for-frame. Deliberately NOT tinted — the helmet keeps its
+// own colours while the body takes the difficulty colour.
+const playerHeadImage = loadImage('./assets/Head_8D_SpaceHelmet.png');
+
 // Jump sheet is 16x80 => 1 column x 5 rows of 16x16 frames — a single held frame per
 // direction, with the same row order as idle and walk.
 const playerJumpImage = loadImage('./assets/Base_Jump.png');
@@ -285,7 +290,8 @@ window.addEventListener('load', async () => {
     await Promise.all([
         ...tintTargets.map(({ source }) => source.decode()),
         terrainTiles.decode(),
-        weaponsImage.decode()
+        weaponsImage.decode(),
+        playerHeadImage.decode()
     ].map(promise => promise.catch(() => {})));
 
     // The pixel font has to be ready before the menu draws its text.
@@ -938,5 +944,28 @@ function drawAnimatedSpritePlayer(
 
     animatedSprite.update(deltaTime);
     animatedSprite.drawSprite(context);
+    // Helmet overlay: same frame, direction and position as the body (so it inherits the
+    // flip above), drawn untinted on top.
+    drawHeadOverlay(animatedSprite);
     context.restore(); // Restore canvas to unchanged state
+}
+
+// Draws the head/helmet frame matching the body sprite's current frame and direction,
+// at the body's position and scale. The head sheet shares the idle/walk 4x5 layout, so
+// the body's (currentRow, currentFrame) index straight into it.
+function drawHeadOverlay(bodySprite) {
+    if (!playerHeadImage.naturalWidth) return; // not decoded yet
+
+    const cols = 4, rows = 5;
+    const frameW = playerHeadImage.naturalWidth / cols;
+    const frameH = playerHeadImage.naturalHeight / rows;
+    const size = frameH * bodySprite.scale;
+
+    context.imageSmoothingEnabled = false;
+    context.drawImage(
+        playerHeadImage,
+        bodySprite.currentFrame * frameW, (bodySprite.currentRow - 1) * frameH, frameW, frameH,
+        bodySprite.x - frameW * 0.5 * bodySprite.scale, bodySprite.y - frameH * 0.5 * bodySprite.scale,
+        size, size
+    );
 }
