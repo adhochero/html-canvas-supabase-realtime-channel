@@ -193,7 +193,6 @@ let inputResponsiveness = 6;
 let localUserSpeed = 150;
 
 let camera = { x: 0, y: 0 };
-let cameraFollowSpeed = 3;
 
 // Tapping the character kills it; tapping the ground carves that tile to dirt.
 input.onQuickPress = (x, y) => {
@@ -454,8 +453,12 @@ function update(timeStamp) {
     }
 
     // Update camera to follow local player
-    camera.x = lerp(camera.x, -localUserPosition.x + HALF_VIEW_WORLD, cameraFollowSpeed * deltaTime);
-    camera.y = lerp(camera.y, -localUserPosition.y + HALF_VIEW_WORLD, cameraFollowSpeed * deltaTime);
+    // Hard-centre the player. A lagging (lerped) camera leaves the player drawn well
+    // off-centre while moving, and that drifting sprite pixel-snaps every frame — the
+    // diagonal staircase. Pinned to centre, the player holds still while the world
+    // scrolls smoothly under it via the sub-pixel blit.
+    camera.x = -localUserPosition.x + HALF_VIEW_WORLD;
+    camera.y = -localUserPosition.y + HALF_VIEW_WORLD;
 
 
     // --- RENDER THE WORLD INTO THE LOW-RES BUFFER ---
