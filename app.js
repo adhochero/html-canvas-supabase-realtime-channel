@@ -396,22 +396,31 @@ function cycleWeapon() {
     currentWeapon = currentWeapon + 1 >= WEAPON_COUNT ? -1 : currentWeapon + 1;
 }
 
-// Draws the on-canvas weapon button into the buffer with an identity transform, so it
-// sits fixed in the corner rather than moving with the world.
+// Screen UI, drawn straight to the screen at a fixed device position. Its art-space
+// coordinates map to device pixels without the camera's sub-pixel shift, so it stays
+// pinned to the corner instead of jiggling with the scrolling world. Hit-testing already
+// uses these same art coordinates, so the two stay in agreement.
 function drawWeaponButton() {
+    context = screenCtx;
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.imageSmoothingEnabled = false;
 
+    const s = screenScale;
+    const x = (WPN_BTN_X - BUFFER_BORDER) * s;
+    const y = (WPN_BTN_Y - BUFFER_BORDER) * s;
+    const w = WPN_BTN_W * s;
+    const h = WPN_BTN_H * s;
+
     context.fillStyle = '#000';
-    context.fillRect(WPN_BTN_X - 2, WPN_BTN_Y - 2, WPN_BTN_W + 4, WPN_BTN_H + 4);
+    context.fillRect(x - 2 * s, y - 2 * s, w + 4 * s, h + 4 * s);
     context.fillStyle = '#161616';
-    context.fillRect(WPN_BTN_X, WPN_BTN_Y, WPN_BTN_W, WPN_BTN_H);
+    context.fillRect(x, y, w, h);
 
     context.fillStyle = 'rgb(255, 53, 94)';
     context.textAlign = 'center';
     context.textBaseline = 'middle';
-    context.font = `${WPN_LABEL_PX}px "3x3", monospace`;
-    context.fillText('WPN', Math.round(WPN_BTN_X + WPN_BTN_W / 2), Math.round(WPN_BTN_Y + WPN_BTN_H / 2));
+    context.font = `${WPN_LABEL_PX * s}px "3x3", monospace`;
+    context.fillText('WPN', Math.round(x + w / 2), Math.round(y + h / 2));
 }
 
 function update(timeStamp) {
@@ -485,7 +494,6 @@ function update(timeStamp) {
     context.imageSmoothingEnabled = false;
 
     drawTerrain();
-    drawWeaponButton(); // fixed corner UI, on the buffer's pixel grid
     blitBufferToScreen(fracX, fracY);
 
     // --- CHARACTER ONTO THE SCREEN (drawn at its true sub-pixel position, so it moves
@@ -549,7 +557,8 @@ function update(timeStamp) {
         }
     }
 
-    context.setTransform(1, 0, 0, 1, 0, 0);
+    // Screen-pinned UI on top of everything.
+    drawWeaponButton();
 
     window.requestAnimationFrame(update);
 }
