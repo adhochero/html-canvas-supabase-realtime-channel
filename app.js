@@ -130,8 +130,8 @@ const horseWalkSheet = document.createElement('canvas');
 const HORSE_COLOR = '#c9a26a';   // light golden brown
 const HORSE_COLS = 4;
 const HORSE_ROWS = 5;
-const HORSE_SPEED = 190;         // world units/s while trotting to the player
-const HORSE_FOLLOW_START = 220;  // starts following once the player is this far
+const HORSE_SPEED = 160;         // world units/s while trotting to the player
+const HORSE_FOLLOW_START = 180;  // starts following once the player is this far
 const HORSE_FOLLOW_STOP = 90;    // stops once back within this — the gap it settles at
 // The horse's on-screen width changes a lot with facing (side view is ~2x the front
 // view), so the shadow's horizontal stretch follows the measured opaque width of each
