@@ -127,12 +127,20 @@ const horseIdleImage = loadImage('./assets/Horse_Idle_8D.png');
 const horseWalkImage = loadImage('./assets/Horse_Walk_8D.png');
 const horseIdleSheet = document.createElement('canvas');
 const horseWalkSheet = document.createElement('canvas');
-const HORSE_COLOR = '#f3c648';   // lighter, more vibrant palomino gold
+const HORSE_COLOR = '#f5be23';   // vibrant golden yellow
 const HORSE_COLS = 4;
 const HORSE_ROWS = 5;
 const HORSE_SPEED = 160;         // world units/s while trotting to the player
-const HORSE_FOLLOW_START = 180;  // starts following once the player is this far
-const HORSE_FOLLOW_STOP = 90;    // stops once back within this — the gap it settles at
+// Wander/follow behaviour: the horse rests until the player leaves its radius, waits a
+// beat, then trots after them; once close it ambles to a random spot near the player and
+// settles there rather than standing on top of them.
+const HORSE_RADIUS = 150;        // player can roam this far before the horse reacts
+const HORSE_WAIT = 1.0;          // seconds the horse waits before setting off
+const HORSE_ARRIVE_DIST = 80;    // "close enough" — starts heading for a resting spot
+const HORSE_SPOT_MIN = 40;       // resting spot is at least this far from the player
+const HORSE_SPOT_RADIUS = 85;    // ...and at most this far — so it rests beside, not on
+const HORSE_STOP_DIST = 8;       // arrival threshold at the resting spot
+const HORSE_ACCEL = 4;           // how quickly velocity eases toward its target (in/out)
 // The horse's on-screen width changes a lot with facing (side view is ~2x the front
 // view), so the shadow's horizontal stretch follows the measured opaque width of each
 // direction row instead of being fixed. Base is the widest (East); the rest scale down.
@@ -144,7 +152,10 @@ const horseFootOffset = (90 / HORSE_ROWS) * spriteScale * 0.5; // frame is 18 ta
 let horse = { x: SPAWN.x - 70, y: SPAWN.y + 50 };
 let horseFacingX = 0;
 let horseFacingY = 1;
-let horseFollowing = false;
+let horseMode = 'idle';          // idle -> waiting -> following -> goingToSpot -> idle
+let horseWaitTimer = 0;
+let horseTarget = { x: 0, y: 0 };
+let horseVel = { x: 0, y: 0 };   // eased velocity, so it accelerates and coasts to a stop
 let horseState = { lastDirectionX: 1 };
 let horseSprite;
 
@@ -1016,37 +1027,101 @@ function drawHeadOverlay(bodySprite) {
     );
 }
 
-// Companion horse. It doesn't track the player tightly — it wanders no closer than it
-// has to, and only trots over once the player gets FOLLOW_START away, stopping again once
-// back within FOLLOW_STOP. The gap between those two is the hysteresis that keeps it
-// loosely "in the vicinity" rather than glued to the player.
+// Companion horse. It rests until the player leaves its radius, waits a beat, then trots
+// after them; once it gets close it picks a random spot near the player and ambles there,
+// settling rather than standing on top of the player.
 function updateHorse(deltaTime) {
     if (!horseSprite) return;
 
-    const dx = localUserPosition.x - horse.x;
-    const dy = localUserPosition.y - horse.y;
-    const dist = Math.hypot(dx, dy);
+    const toPlayerX = localUserPosition.x - horse.x;
+    const toPlayerY = localUserPosition.y - horse.y;
+    const distToPlayer = Math.hypot(toPlayerX, toPlayerY);
 
-    if (!horseFollowing && dist > HORSE_FOLLOW_START) horseFollowing = true;
-    else if (horseFollowing && dist < HORSE_FOLLOW_STOP) horseFollowing = false;
+    let moveX = 0, moveY = 0, moving = false;
 
-    let moving = false;
-    if (horseFollowing && dist > 0.001) {
-        const nx = dx / dist;
-        const ny = dy / dist;
-        horse.x += nx * HORSE_SPEED * deltaTime;
-        horse.y += ny * HORSE_SPEED * deltaTime;
-        horseFacingX = nx;
-        horseFacingY = ny;
-        if (nx !== 0) horseState.lastDirectionX = nx;
-        moving = true;
+    switch (horseMode) {
+        case 'idle':
+            if (distToPlayer > HORSE_RADIUS) {
+                horseMode = 'waiting';
+                horseWaitTimer = HORSE_WAIT;
+            }
+            break;
+
+        case 'waiting':
+            horseWaitTimer -= deltaTime;
+            if (distToPlayer <= HORSE_RADIUS) {
+                horseMode = 'idle';           // player came back on their own
+            } else if (horseWaitTimer <= 0) {
+                horseMode = 'following';
+            }
+            break;
+
+        case 'following':
+            moveX = toPlayerX;
+            moveY = toPlayerY;
+            moving = true;
+            if (distToPlayer < HORSE_ARRIVE_DIST) {
+                // Pick a random resting spot in the ring between MIN and RADIUS around the
+                // player (area-weighted, so it's evenly spread rather than clustered).
+                const angle = Math.random() * Math.PI * 2;
+                const radius = Math.sqrt(
+                    HORSE_SPOT_MIN * HORSE_SPOT_MIN +
+                    Math.random() * (HORSE_SPOT_RADIUS * HORSE_SPOT_RADIUS - HORSE_SPOT_MIN * HORSE_SPOT_MIN)
+                );
+                horseTarget.x = localUserPosition.x + Math.cos(angle) * radius;
+                horseTarget.y = localUserPosition.y + Math.sin(angle) * radius;
+                horseMode = 'goingToSpot';
+            }
+            break;
+
+        case 'goingToSpot': {
+            if (distToPlayer > HORSE_RADIUS) {
+                horseMode = 'following';       // player bolted again — chase, then re-pick
+                break;
+            }
+            const toSpotX = horseTarget.x - horse.x;
+            const toSpotY = horseTarget.y - horse.y;
+            if (Math.hypot(toSpotX, toSpotY) < HORSE_STOP_DIST) {
+                horseMode = 'idle';
+            } else {
+                moveX = toSpotX;
+                moveY = toSpotY;
+                moving = true;
+            }
+            break;
+        }
+    }
+
+    // Ease the velocity toward the intended direction rather than snapping to full speed,
+    // so the horse accelerates from rest and coasts to a stop.
+    let desiredVX = 0, desiredVY = 0;
+    if (moving) {
+        const mag = Math.hypot(moveX, moveY);
+        if (mag > 0.001) {
+            desiredVX = (moveX / mag) * HORSE_SPEED;
+            desiredVY = (moveY / mag) * HORSE_SPEED;
+        }
+    }
+    horseVel.x = lerp(horseVel.x, desiredVX, HORSE_ACCEL * deltaTime);
+    horseVel.y = lerp(horseVel.y, desiredVY, HORSE_ACCEL * deltaTime);
+    horse.x += horseVel.x * deltaTime;
+    horse.y += horseVel.y * deltaTime;
+
+    // Animation and facing follow the actual velocity, so the walk keeps playing while the
+    // horse is still coasting after the state machine has stopped steering it.
+    const speed = Math.hypot(horseVel.x, horseVel.y);
+    const trotting = speed > 4;
+    if (trotting) {
+        horseFacingX = horseVel.x / speed;
+        horseFacingY = horseVel.y / speed;
+        if (horseVel.x !== 0) horseState.lastDirectionX = horseVel.x;
     }
 
     // Walk while trotting, idle while settled; the sheet only swaps on a state change so
     // the frame counter isn't reset every tick.
-    const sheet = moving ? horseWalkSheet : horseIdleSheet;
+    const sheet = trotting ? horseWalkSheet : horseIdleSheet;
     if (horseSprite.spriteSheet !== sheet) {
-        horseSprite.setSpriteSheet(sheet, HORSE_COLS, HORSE_ROWS, horseSprite.currentRow, HORSE_COLS, moving ? 0.14 : 0.25);
+        horseSprite.setSpriteSheet(sheet, HORSE_COLS, HORSE_ROWS, horseSprite.currentRow, HORSE_COLS, trotting ? 0.14 : 0.25);
     }
     const row = getDirectionRow(horseFacingX, horseFacingY);
     if (row !== null) horseSprite.currentRow = row;
