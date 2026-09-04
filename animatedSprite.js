@@ -93,7 +93,7 @@ export class AnimatedSprite{
             frameHeight, //sheight
             this.x - frameWidth * 0.5 * this.scale, //x
             this.y - frameHeight * 0.5 * this.scale, //y
-            frameHeight * this.scale, //width
+            frameWidth * this.scale, //width
             frameHeight * this.scale //height
         );
     }

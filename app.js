@@ -120,6 +120,34 @@ const shadowImage = loadImage('./assets/shadow.png');
 // 4x4 sheet of dual-grid terrain tiles, also outside the tint targets
 const terrainTiles = loadImage('./assets/DualGrid_TileSet_Grass.png');
 
+// Companion horse: 96x90 sheets => 4 columns x 5 rows of 24x18 frames, same directional
+// row order as the player. Tinted once to a fixed light golden brown (not the difficulty
+// colour), so it gets its own tinted sheets rather than joining tintTargets.
+const horseIdleImage = loadImage('./assets/Horse_Idle_8D.png');
+const horseWalkImage = loadImage('./assets/Horse_Walk_8D.png');
+const horseIdleSheet = document.createElement('canvas');
+const horseWalkSheet = document.createElement('canvas');
+const HORSE_COLOR = '#c9a26a';   // light golden brown
+const HORSE_COLS = 4;
+const HORSE_ROWS = 5;
+const HORSE_SPEED = 190;         // world units/s while trotting to the player
+const HORSE_FOLLOW_START = 220;  // starts following once the player is this far
+const HORSE_FOLLOW_STOP = 90;    // stops once back within this — the gap it settles at
+// The horse's on-screen width changes a lot with facing (side view is ~2x the front
+// view), so the shadow's horizontal stretch follows the measured opaque width of each
+// direction row instead of being fixed. Base is the widest (East); the rest scale down.
+const HORSE_SHADOW_SCALE_X = 2.8;
+const HORSE_SHADOW_SCALE_Y = 1.4;
+const HORSE_SHADOW_REL_W = [0.59, 0.86, 1.0, 0.77, 0.50]; // rows 1..5: N, NE, E, SE, S
+const horseFootOffset = (90 / HORSE_ROWS) * spriteScale * 0.5; // frame is 18 tall
+
+let horse = { x: SPAWN.x - 70, y: SPAWN.y + 50 };
+let horseFacingX = 0;
+let horseFacingY = 1;
+let horseFollowing = false;
+let horseState = { lastDirectionX: 1 };
+let horseSprite;
+
 // Weapon overlay sheet: 2 columns x 3 rows of 16x16 = 6 weapons. Drawn on top of the
 // player, and NOT tinted — weapons are held items, not part of the body.
 const weaponsImage = loadImage('./assets/Weapons.png');
@@ -291,8 +319,14 @@ window.addEventListener('load', async () => {
         ...tintTargets.map(({ source }) => source.decode()),
         terrainTiles.decode(),
         weaponsImage.decode(),
-        playerHeadImage.decode()
+        playerHeadImage.decode(),
+        horseIdleImage.decode(),
+        horseWalkImage.decode()
     ].map(promise => promise.catch(() => {})));
+
+    // Horse gets a one-off golden-brown tint into its own sheets.
+    tintSheet(horseIdleImage, horseIdleSheet, HORSE_COLOR);
+    tintSheet(horseWalkImage, horseWalkSheet, HORSE_COLOR);
 
     // The pixel font has to be ready before the menu draws its text.
     if (document.fonts && document.fonts.load) {
@@ -303,6 +337,8 @@ window.addEventListener('load', async () => {
 
     // Left stopped: the single frame is held for the whole jump, only the row changes
     jumpAnimatedSprite = new AnimatedSprite(playerJumpSheet, 1, 5, 5, 1, spriteScale, 333, 333, 1, false, false, false);
+
+    horseSprite = new AnimatedSprite(horseIdleSheet, HORSE_COLS, HORSE_ROWS, 5, HORSE_COLS, spriteScale, 0, 0, 0.2, false, true, true);
 
     // Menu preview: the idle sprite facing the camera (row 5 = South), drawn from the same
     // tinted sheet, so re-tinting on a difficulty pick recolours it live.
@@ -473,6 +509,8 @@ function update(timeStamp) {
         localUserPosition.y += moveDirection.y * deltaTime;
     }
 
+    updateHorse(deltaTime);
+
     // Update camera to follow local player
     camera.x = lerp(camera.x, -localUserPosition.x + HALF_VIEW_WORLD, cameraFollowSpeed * deltaTime);
     camera.y = lerp(camera.y, -localUserPosition.y + HALF_VIEW_WORLD, cameraFollowSpeed * deltaTime);
@@ -511,8 +549,14 @@ function update(timeStamp) {
     context.setTransform(viewScale, 0, 0, viewScale, camera.x * viewScale, camera.y * viewScale);
     context.imageSmoothingEnabled = false;
 
-    // Shadow rides under the player, outside the respawn flash so it holds steady.
+    // Shadows first, under everything.
     drawShadow(localUserPosition.x, localUserPosition.y);
+    drawHorseShadow();
+
+    // Depth sort the horse against the player by ground position: whoever is further up
+    // the screen draws first (behind).
+    const horseBehindPlayer = horse.y < localUserPosition.y;
+    if (horseBehindPlayer) drawHorse();
 
     if (isAlive) {
         context.save();
@@ -562,6 +606,8 @@ function update(timeStamp) {
             if (respawnTimer >= respawnDelay) respawnPlayer();
         }
     }
+
+    if (!horseBehindPlayer) drawHorse();
 
     // Screen-pinned UI on top of everything.
     drawWeaponButton();
@@ -968,4 +1014,63 @@ function drawHeadOverlay(bodySprite) {
         bodySprite.x - frameW * 0.5 * bodySprite.scale, bodySprite.y - frameH * 0.5 * bodySprite.scale,
         size, size
     );
+}
+
+// Companion horse. It doesn't track the player tightly — it wanders no closer than it
+// has to, and only trots over once the player gets FOLLOW_START away, stopping again once
+// back within FOLLOW_STOP. The gap between those two is the hysteresis that keeps it
+// loosely "in the vicinity" rather than glued to the player.
+function updateHorse(deltaTime) {
+    if (!horseSprite) return;
+
+    const dx = localUserPosition.x - horse.x;
+    const dy = localUserPosition.y - horse.y;
+    const dist = Math.hypot(dx, dy);
+
+    if (!horseFollowing && dist > HORSE_FOLLOW_START) horseFollowing = true;
+    else if (horseFollowing && dist < HORSE_FOLLOW_STOP) horseFollowing = false;
+
+    let moving = false;
+    if (horseFollowing && dist > 0.001) {
+        const nx = dx / dist;
+        const ny = dy / dist;
+        horse.x += nx * HORSE_SPEED * deltaTime;
+        horse.y += ny * HORSE_SPEED * deltaTime;
+        horseFacingX = nx;
+        horseFacingY = ny;
+        if (nx !== 0) horseState.lastDirectionX = nx;
+        moving = true;
+    }
+
+    // Walk while trotting, idle while settled; the sheet only swaps on a state change so
+    // the frame counter isn't reset every tick.
+    const sheet = moving ? horseWalkSheet : horseIdleSheet;
+    if (horseSprite.spriteSheet !== sheet) {
+        horseSprite.setSpriteSheet(sheet, HORSE_COLS, HORSE_ROWS, horseSprite.currentRow, HORSE_COLS, moving ? 0.14 : 0.25);
+    }
+    const row = getDirectionRow(horseFacingX, horseFacingY);
+    if (row !== null) horseSprite.currentRow = row;
+    horseSprite.update(deltaTime);
+}
+
+function drawHorseShadow() {
+    if (!shadowImage.naturalWidth || !horseSprite) return;
+    const rel = HORSE_SHADOW_REL_W[horseSprite.currentRow - 1] || 1;
+    drawShadowNineSlice(horse.x, horse.y, HORSE_SHADOW_SCALE_X * rel, HORSE_SHADOW_SCALE_Y);
+}
+
+function drawHorse() {
+    if (!horseSprite || !horseIdleSheet.width) return;
+
+    horseSprite.x = horse.x;
+    horseSprite.y = horse.y - horseFootOffset;
+
+    context.save();
+    // West-facing frames reuse the east-side rows and rely on this flip, same as the player.
+    if (horseState.lastDirectionX < 0) {
+        context.translate(horseSprite.x * 2, 0);
+        context.scale(-1, 1);
+    }
+    horseSprite.drawSprite(context);
+    context.restore();
 }
