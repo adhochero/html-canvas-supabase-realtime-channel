@@ -139,6 +139,8 @@ const HORSE_WAIT = 1.0;          // seconds the horse waits before setting off
 const HORSE_ARRIVE_DIST = 80;    // "close enough" — starts heading for a resting spot
 const HORSE_SPOT_MIN = 40;       // resting spot is at least this far from the player
 const HORSE_SPOT_RADIUS = 85;    // ...and at most this far — so it rests beside, not on
+const HORSE_SPOT_ARC = Math.PI / 2;   // +/-90deg of the heading (a 180deg forward arc), so
+                                      // the horse never picks a spot behind it and turns back
 const HORSE_STOP_DIST = 8;       // arrival threshold at the resting spot
 const HORSE_ACCEL = 4;           // how quickly velocity eases toward its target (in/out)
 // The horse's on-screen width changes a lot with facing (side view is ~2x the front
@@ -1062,8 +1064,12 @@ function updateHorse(deltaTime) {
             moving = true;
             if (distToPlayer < HORSE_ARRIVE_DIST) {
                 // Pick a random resting spot in the ring between MIN and RADIUS around the
-                // player (area-weighted, so it's evenly spread rather than clustered).
-                const angle = Math.random() * Math.PI * 2;
+                // player (area-weighted, so it's evenly spread rather than clustered), but
+                // only within a forward arc of the horse's current heading — so it keeps
+                // ambling onward past the player rather than doubling back.
+                const speed = Math.hypot(horseVel.x, horseVel.y);
+                const heading = speed > 1 ? Math.atan2(horseVel.y, horseVel.x) : Math.random() * Math.PI * 2;
+                const angle = heading + (Math.random() * 2 - 1) * HORSE_SPOT_ARC;
                 const radius = Math.sqrt(
                     HORSE_SPOT_MIN * HORSE_SPOT_MIN +
                     Math.random() * (HORSE_SPOT_RADIUS * HORSE_SPOT_RADIUS - HORSE_SPOT_MIN * HORSE_SPOT_MIN)
